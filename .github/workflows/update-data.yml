@@ -1,10 +1,14 @@
 name: Actualizar datos de criminalidad
 
-# Refresca datos de datos.gov.co (Socrata) cada 6 horas y publica el resultado en el
-# repo privado del dashboard (Angelsistemas7/CrimenAi). Este repo es público solo para
-# que el cron corra gratis e ilimitado en Actions; el dashboard vive aparte, privado.
-# Requiere el secret PRIVATE_REPO_TOKEN (fine-grained PAT con permiso Contents: write
-# solo sobre Angelsistemas7/CrimenAi) — ver README.md de este repo para cómo generarlo.
+# Refresca datos de datos.gov.co (Socrata) cada 6 horas y publica el resultado
+# (dist/js/data.js, dist/data/colombia_crimen.json) en ESTE mismo repo público —
+# nada más. Existe solo para que el cron corra gratis e ilimitado en Actions.
+# El repo privado del dashboard (Angelsistemas7/CrimenAi) tiene su propio workflow
+# que lee estos archivos (repo público = lectura sin autenticación) y los
+# incorpora con su propio GITHUB_TOKEN. No hace falta ningún token/secret aquí.
+#
+# Los ~50 JSON crudos de data/ (ver .gitignore) NO se versionan: se regeneran
+# desde cero en cada corrida, son build cache, no hace falta duplicarlos en git.
 
 on:
   schedule:
@@ -12,7 +16,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: update-data
@@ -23,18 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout scraper
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          path: scraper
-          fetch-depth: 1
-
-      - name: Checkout dashboard privado
-        uses: actions/checkout@v4
-        with:
-          repository: Angelsistemas7/CrimenAi
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          path: dashboard
           fetch-depth: 1
 
       - name: Setup Node
@@ -44,49 +39,40 @@ jobs:
 
       - name: Descargar datos crudos (Socrata, agregados vía SoQL)
         run: node fetch_raw.js
-        working-directory: scraper/data
+        working-directory: data
 
       - name: Descargar población municipal DANE (para tasas por 100.000 hab.)
         run: node fetch_poblacion.js
-        working-directory: scraper/data
+        working-directory: data
 
       - name: Fusionar datos (10 categorías SIEDCO)
         run: node merge.js
-        working-directory: scraper/data
+        working-directory: data
 
       - name: Aplicar parche Fiscalía (SPOA) + Medicina Legal (SIRDEC)
         run: node patch_fiscalia_ubpd.js
-        working-directory: scraper/data
+        working-directory: data
 
-      - name: Copiar resultado al checkout del dashboard privado
-        run: |
-          cp scraper/dist/js/data.js dashboard/js/data.js
-          cp scraper/dist/data/colombia_crimen.json dashboard/data/colombia_crimen.json
-          node -e "
-            const fs = require('fs');
-            const p = 'dashboard/index.html';
-            const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-            let html = fs.readFileSync(p, 'utf8');
-            html = html.replace(/(js\/data\.js\?v=)\d{8}/, '\$1' + stamp);
-            fs.writeFileSync(p, html);
-          "
-
-      - name: Detectar cambios
+      - name: Detectar cambios reales (ignora meta.generado, que cambia siempre)
         id: changes
-        working-directory: dashboard
         run: |
-          if git diff --quiet -- data/colombia_crimen.json js/data.js index.html; then
+          if git show HEAD:dist/data/colombia_crimen.json > /tmp/old.json 2>/dev/null; then
+            jq 'del(.meta.generado)' /tmp/old.json > /tmp/old_norm.json
+          else
+            echo '{}' > /tmp/old_norm.json
+          fi
+          jq 'del(.meta.generado)' dist/data/colombia_crimen.json > /tmp/new_norm.json
+          if diff -q /tmp/old_norm.json /tmp/new_norm.json > /dev/null; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit y push al repo privado si hubo cambios
+      - name: Commit y push si hubo cambios reales
         if: steps.changes.outputs.changed == 'true'
-        working-directory: dashboard
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/colombia_crimen.json js/data.js index.html
+          git add dist/
           git commit -m "Actualiza datos de criminalidad ($(date -u +%Y-%m-%d\ %H:%M\ UTC))"
           git push

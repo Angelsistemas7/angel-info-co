@@ -1,0 +1,4 @@
+# Los ~50 JSON crudos/intermedios en data/ se regeneran 100% desde cero en cada
+# corrida (fetch_raw.js, fetch_poblacion.js) - son build cache, no hace falta
+# versionarlos ni duplicarlos en git. Lo unico que se publica es dist/.
+data/*.json
