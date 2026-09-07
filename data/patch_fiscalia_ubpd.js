@@ -64,7 +64,7 @@ const desaparecidosUBPD = {
 
 output.denunciasFiscalia = denunciasFiscalia;
 output.desaparecidosUBPD = desaparecidosUBPD;
-output.meta.fuente = 'Policía Nacional de Colombia (SIEDCO) vía datos.gov.co + Fiscalía General de la Nación (SPOA) para delitos informáticos, procesos y víctimas + Instituto Nacional de Medicina Legal y Ciencias Forenses (SIRDEC) para personas desaparecidas';
+output.meta.fuente = 'Policía Nacional de Colombia (SIEDCO) vía datos.gov.co + Fiscalía General de la Nación (SPOA) para delitos informáticos, procesos y víctimas + Instituto Nacional de Medicina Legal y Ciencias Forenses (SIRDEC) para personas desaparecidas y para homicidios en municipios amazónicos que SIEDCO nunca reporta';
 output.meta.generado = new Date().toISOString();
 
 fs.writeFileSync(path + '/colombia_crimen.json', JSON.stringify(output));

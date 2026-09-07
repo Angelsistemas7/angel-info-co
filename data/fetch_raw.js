@@ -310,6 +310,43 @@ addTask('desaparecidos_sexo', async () => soql(DESAP_ID, {
   $where: DESAP_WHERE, $group: 'sexo_del_desaparecido', $order: 'total DESC', $limit: 20,
 }));
 
+// 11) Homicidios Medicina Legal (INMLCF) para el hueco real de SIEDCO en Amazonas/Guainía/Vaupés
+// -- ver ESTADO_SESION.md del repo CrimenAi ("Ronda — Amazonía colombiana...") para el detalle
+// completo de por qué hace falta esta fuente aparte. SIEDCO (Policía Nacional) NUNCA ha registrado,
+// en toda su serie histórica (2003-2026), ni un solo hecho de homicidio/extorsión/hurto en 11-17 de
+// los 26 municipios/corregimientos departamentales de estos 3 departamentos -- no es un hueco del
+// periodo actual, es una ausencia total y sistemática (confirmado consultando m8fd-ahd9 sin filtro
+// de año). Medicina Legal SÍ los desagrega, porque registra cada muerte violenta que dictamina sin
+// importar cuán pequeño sea el municipio. Se usan las 2 fuentes oficiales de Medicina Legal en
+// datos.gov.co:
+// - vtub-3de2 "Presuntos Homicidios. Colombia, 2015 a 2024. Cifras definitivas"
+// - 2kpj-cktv "Lesiones fatales de causa externa - Información preliminar - enero 2025 a junio 2026"
+//   (aquí se filtra manera_de_muerte='1 Presuntos Homicidios'; el dataset también trae suicidios/
+//   accidentes/tránsito, que no son parte del alcance de este proyecto)
+// Alcance ACOTADO a los 3 departamentos (no se usa esta fuente para el resto del país -- allí SIEDCO
+// ya tiene cobertura real y usar Medicina Legal ahí generaría doble conteo con distinta metodología
+// de conteo de víctimas/hechos). merge.js solo usa estas filas para los municipios que SIEDCO deja
+// totalmente vacíos; nunca sobrescribe un municipio que ya tiene fila real de SIEDCO.
+const MEDLEGAL_DEPTOS_WHERE = "departamento_del_hecho_dane in('Amazonas','Guainía','Vaupés')";
+addTask('medlegal_homicidio_amazonia_historico', async () => {
+  const rows = await soql('vtub-3de2', {
+    $select: 'departamento_del_hecho_dane as departamento, municipio_del_hecho_dane as municipio, codigo_dane_municipio as codigo_dane, a_o_del_hecho as anio, count(*) as total',
+    $where: MEDLEGAL_DEPTOS_WHERE,
+    $group: 'departamento, municipio, codigo_dane, anio',
+    $limit: 2000,
+  });
+  return rows;
+});
+addTask('medlegal_homicidio_amazonia_preliminar', async () => {
+  const rows = await soql('2kpj-cktv', {
+    $select: 'departamento_del_hecho_dane as departamento, municipio_del_hecho_dane as municipio, codigo_dane_municipio as codigo_dane, a_o_del_hecho as anio, count(*) as total',
+    $where: MEDLEGAL_DEPTOS_WHERE + " AND manera_de_muerte='1 Presuntos Homicidios'",
+    $group: 'departamento, municipio, codigo_dane, anio',
+    $limit: 2000,
+  });
+  return rows;
+});
+
 // -------- Ejecución (secuencial, con pequeño delay para no saturar la API pública) --------
 async function main() {
   console.log(`Descargando ${tasks.length} fuentes crudas desde datos.gov.co (Socrata)...`);

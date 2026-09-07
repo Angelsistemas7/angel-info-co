@@ -321,6 +321,73 @@ const historicoMunicipal = {
   hurto: municipioHistorico(['hurto_personas', 'hurto_residencias', 'hurto_vehiculos', 'hurto_extra']),
 };
 
+// -------- Gap-fill: Medicina Legal (INMLCF) para municipios que SIEDCO NUNCA reporta --------
+// Ver detalle completo en fetch_raw.js (sección 11) y ESTADO_SESION.md del repo CrimenAi ("Ronda —
+// Amazonía colombiana: municipios en cero rellenados con Medicina Legal"). Confirmado consultando
+// m8fd-ahd9 SIN filtro de año: en Amazonas/Guainía/Vaupés, SIEDCO no tiene NI UNA fila histórica
+// (2003-2026) para varios de sus municipios/corregimientos departamentales -- no es un hueco del
+// periodo actual, es una ausencia sistemática y total. Se rellenan con el registro real de
+// homicidios de Medicina Legal (INMLCF: "Presuntos Homicidios 2015-2024, cifras definitivas" +
+// "Lesiones fatales de causa externa, información preliminar ene-2025 a jun-2026"), la fuente
+// forense primaria de homicidios en Colombia. SOLO se usa para los municipios que SIEDCO deja
+// COMPLETAMENTE vacíos (nunca sobrescribe uno que ya tenga fila real de SIEDCO, para no mezclar 2
+// metodologías de conteo - hecho policial vs. dictamen forense - en el mismo número). Extorsión/
+// hurto quedan en 0 para estos municipios porque Medicina Legal no cubre esas categorías (no es que
+// se hayan verificado en cero - queda documentado en notaFuente de cada municipio afectado).
+const MEDLEGAL_DEPTOS = new Set(['AMAZONAS', 'GUAINIA', 'VAUPES']);
+function medlegalRows(file) {
+  return tryLoad(file + '.json')
+    .map(r => ({
+      deptoKey: normalizeDeptoName(r.departamento),
+      municipio: String(r.municipio).trim(),
+      anio: String(r.anio),
+      total: parseFloat(r.total) || 0,
+    }))
+    .filter(r => MEDLEGAL_DEPTOS.has(r.deptoKey));
+}
+const medlegalHomicidios = [
+  ...medlegalRows('medlegal_homicidio_amazonia_historico'),
+  ...medlegalRows('medlegal_homicidio_amazonia_preliminar'),
+];
+// Agrupa por municipio: total del periodo actual (2025+2026, mismo criterio que el resto del
+// dashboard) + serie completa por año (para historicoMunicipal).
+const medlegalByMuni = {}; // "MUNIKEY|DEPTOKEY" -> { municipio, deptoKey, actual, byYear }
+medlegalHomicidios.forEach(r => {
+  const muniKey = normalizeMuniKey(r.municipio) + '|' + r.deptoKey;
+  if (!medlegalByMuni[muniKey]) medlegalByMuni[muniKey] = { municipio: r.municipio, deptoKey: r.deptoKey, actual: 0, byYear: {} };
+  const bucket = medlegalByMuni[muniKey];
+  bucket.byYear[r.anio] = (bucket.byYear[r.anio] || 0) + r.total;
+  if (r.anio === '2025' || r.anio === '2026') bucket.actual += r.total;
+});
+
+let municipiosRellenadosMedLegal = 0;
+Object.values(medlegalByMuni).forEach(({ municipio, deptoKey, actual, byYear }) => {
+  const muniKeyNorm = normalizeMuniKey(municipio);
+  const compoundKey = muniKeyNorm + '|' + deptoKey;
+  const lista = municipiosDetalle[deptoKey];
+  if (!lista) return;
+  const yaExiste = lista.some(m => normalizeMuniKey(m.municipio) === muniKeyNorm);
+  if (yaExiste) return; // SIEDCO ya tiene fila real para este municipio, no se toca
+  lista.push({
+    municipio,
+    homicidios: actual,
+    extorsion: 0,
+    hurto: 0,
+    total: actual,
+    fuenteHomicidios: 'medicina_legal',
+    notaFuente: 'SIEDCO (Policía Nacional) no ha reportado nunca un hecho en este municipio (verificado en toda su serie histórica 2003-2026). Homicidios tomados del registro de Medicina Legal (INMLCF), la fuente forense primaria. Extorsión/hurto en 0 porque Medicina Legal no cubre esas categorías, no porque se hayan verificado en cero.',
+  });
+  municipiosRellenadosMedLegal++;
+  // Histórico municipal: solo agrega la serie si SIEDCO tampoco tiene histórico para esta llave.
+  if (historicoMunicipal.homicidios[compoundKey] === undefined) {
+    historicoMunicipal.homicidios[compoundKey] = { ...byYear };
+  }
+});
+['AMAZONAS', 'GUAINIA', 'VAUPES'].forEach(k => {
+  if (municipiosDetalle[k]) municipiosDetalle[k].sort((a, b) => b.total - a.total);
+});
+console.log(`Medicina Legal (gap-fill Amazonía): ${municipiosRellenadosMedLegal} municipios añadidos que SIEDCO nunca había reportado (Amazonas/Guainía/Vaupés).`);
+
 // -------- Población DANE (para tasas de criminalidad por 100.000 habitantes) --------
 // Fuente: data/poblacion_municipios.json, generado por data/fetch_poblacion.js a partir del archivo
 // oficial DANE "Proyecciones y Retroproyecciones de Población municipal por área 2018-2042" (PPED,
@@ -485,12 +552,12 @@ const noticias = [
 
 const output = {
   meta: {
-    fuente: 'Policía Nacional de Colombia (SIEDCO) vía datos.gov.co + Fiscalía General de la Nación (SPOA) para delitos informáticos, procesos y víctimas + Instituto Nacional de Medicina Legal y Ciencias Forenses (SIRDEC) para personas desaparecidas',
+    fuente: 'Policía Nacional de Colombia (SIEDCO) vía datos.gov.co + Fiscalía General de la Nación (SPOA) para delitos informáticos, procesos y víctimas + Instituto Nacional de Medicina Legal y Ciencias Forenses (SIRDEC) para personas desaparecidas y para homicidios en municipios amazónicos que SIEDCO nunca reporta',
     periodoActual: 'Enero 2025 - Mayo 2026 (mayo parcial)',
     rangoHistorico: { min: anioGlobalMin, max: anioGlobalMax },
     rangoAnios,
     generado: new Date().toISOString(),
-    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 4 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre). Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO.',
+    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 4 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre). Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle).',
   },
   categorias: CATS,
   categoriasOverlay: CATS_OVERLAY,
