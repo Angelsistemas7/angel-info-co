@@ -8,6 +8,7 @@
 // colombia_crimen.json (el resultado final ya fusionado) y js/data.js SÍ están completos y vigentes.
 const fs = require('fs');
 const path = __dirname;
+const { CURRENT_YEAR } = require('./pipeline_config');
 
 function load(name) {
   return JSON.parse(fs.readFileSync(path + '/' + name, 'utf8'));
@@ -73,7 +74,19 @@ DEPARTAMENTOS.forEach(d => { byKey[d.key] = { ...d }; });
 const CATS = ['homicidios', 'secuestros', 'extorsion', 'amenazas', 'delitos_sexuales', 'lesiones', 'hurto', 'violencia_intrafamiliar', 'terrorismo', 'estupefacientes'];
 // feminicidios es un subconjunto de homicidios (misma fuente, spoa_caracterizacion='FEMINICIDIO'):
 // se muestra aparte para análisis pero NO se suma al total nacional para evitar doble conteo.
-const CATS_OVERLAY = ['feminicidios'];
+// minas_antipersonal (víctimas de MAP/MUSE/AEI, fuente CNMH/SIEVCAC) NO es subconjunto de ninguna
+// otra categoría (no viene de SIEDCO/Policía Nacional, es un registro de victimización del
+// conflicto armado, no una denuncia penal) pero tampoco se suma al total nacional a propósito:
+// es una naturaleza de dato distinta a "delito" y sumarla distorsionaría el Índice de Seguridad
+// (mismo criterio que dejar desaparecidosUBPD fuera de CATS). Se muestra igual en el mapa/leyenda/
+// histórico vía el mecanismo genérico de categorías overlay.
+const CATS_OVERLAY = ['feminicidios', 'minas_antipersonal', 'capturas'];
+// 'capturas' (personas detenidas por la Policía Nacional, DIJIN 3jdh-nmwu) tampoco se suma al
+// total nacional, por la misma razón que minas_antipersonal: no es un delito denunciado sino
+// actividad operativa policial (mismo criterio que las aprehensiones de Costa Rica). Una captura
+// no equivale a un delito nuevo (la persona puede quedar libre, o corresponder a un hecho ya
+// contado en otra categoría), así que sumarla inflaría el total y rompería la comparabilidad
+// de la serie SIEDCO. Se muestra igual en mapa/leyenda/histórico vía el overlay genérico.
 const ALL_CATS = CATS.concat(CATS_OVERLAY);
 ALL_CATS.forEach(c => { DEPARTAMENTOS.forEach(d => { byKey[d.key][c] = 0; }); });
 
@@ -83,6 +96,7 @@ const HURTO_SUBFUENTES = {
   residencias: 'hurto_residencias',
   vehiculos: 'hurto',       // 9vha-vh9n: motocicletas + automotores
   otros: 'hurto_extra',     // d4fr-sbn2: abigeato + entidades financieras + piratería terrestre
+  comercio: 'hurto_comercio', // 7i2x-h5vp: hurto a comercio (antes no entraba en ninguna subfuente)
 };
 
 const FILES = {
@@ -97,9 +111,11 @@ const FILES = {
   terrorismo: 'terrorismo',
   estupefacientes: 'estupefacientes',
   feminicidios: 'feminicidio',
+  minas_antipersonal: 'minas_antipersonal',
+  capturas: 'capturas',
 };
 
-// -------- Current period (2025-2026) department totals --------
+// -------- Current period (año vigente) department totals --------
 function applyCurrentPeriod(field, file) {
   const rows = tryLoad(file + '.json');
   rows.forEach(r => {
@@ -118,13 +134,16 @@ applyCurrentPeriod('hurto', 'hurto_personas_actual');
 applyCurrentPeriod('hurto', 'hurto_residencias_actual');
 applyCurrentPeriod('hurto', 'hurto');
 applyCurrentPeriod('hurto', 'hurto_extra_actual');
+applyCurrentPeriod('hurto', 'hurto_comercio_actual');
 applyCurrentPeriod('feminicidios', 'feminicidio_actual');
+applyCurrentPeriod('capturas', 'capturas');
 
-// amenazas, lesiones, terrorismo: derive current period (2025+2026) from historical depto x year files
+// amenazas, lesiones, terrorismo y minas: derivar solo el año vigente desde los históricos por
+// departamento. Antes se sumaban 2025+2026 y se etiquetaban juntos como "actual".
 function currentFromHistDepto(field, file) {
   const rows = tryLoad('hist_depto_' + file + '.json');
   rows.forEach(r => {
-    if (r.anio !== '2025' && r.anio !== '2026') return;
+    if (String(r.anio) !== String(CURRENT_YEAR)) return;
     const key = normalizeDeptoName(r.departamento);
     if (!byKey[key]) { console.error('Depto no reconocido (hist->actual):', r.departamento, '->', key, file); return; }
     byKey[key][field] += parseFloat(r.total) || 0;
@@ -133,6 +152,7 @@ function currentFromHistDepto(field, file) {
 currentFromHistDepto('amenazas', 'amenazas');
 currentFromHistDepto('lesiones', 'lesiones');
 currentFromHistDepto('terrorismo', 'terrorismo');
+currentFromHistDepto('minas_antipersonal', 'minas_antipersonal');
 
 const departamentos = Object.values(byKey).map(d => {
   const total = CATS.reduce((s, c) => s + d[c], 0);
@@ -170,14 +190,16 @@ ALL_CATS.forEach(c => {
   historicoDepartamental[c] = byDepto;
 });
 
-// Range of years actually available per category
+// Range of years actually available per category (una categoría sin serie — ej. crudos aún no
+// descargados — queda en {min:null,max:null} y no afecta el rango global)
 const rangoAnios = {};
 ALL_CATS.forEach(c => {
   const years = historicoNacional[c].map(r => parseInt(r.anio, 10)).filter(y => y >= 2003 && y <= 2026);
-  rangoAnios[c] = { min: Math.min(...years), max: Math.max(...years) };
+  rangoAnios[c] = years.length ? { min: Math.min(...years), max: Math.max(...years) } : { min: null, max: null };
 });
-const anioGlobalMin = Math.min(...Object.values(rangoAnios).map(r => r.min));
-const anioGlobalMax = Math.max(...Object.values(rangoAnios).map(r => r.max));
+const _rangoVals = Object.values(rangoAnios).filter(r => r.min !== null);
+const anioGlobalMin = Math.min(..._rangoVals.map(r => r.min));
+const anioGlobalMax = Math.max(..._rangoVals.map(r => r.max));
 
 // -------- Monthly trend (recent) --------
 function monthly(file) {
@@ -231,11 +253,17 @@ const analitica = {
   vif_grupo_etario: breakdown('vif_grupo_etario'),
   secuestro_tipo: breakdown('secuestro_tipo').map(r => ({ ...r, label: r.label.replace(/^ARTICULO \d+\.\s*/i, '') })),
   estupefacientes_tipo: breakdown('estupefacientes_tipo'),
+  minas_condicion: breakdown('minas_condicion'),
+  minas_situacion: breakdown('minas_situacion'),
+  capturas_conducta: breakdown('capturas_conducta'),
+  capturas_genero: breakdown('capturas_genero'),
+  capturas_grupo_etario: breakdown('capturas_grupo_etario'),
   hurto_composicion: [
     { label: 'Hurto a Personas', total: tryLoad('hurto_personas_actual.json').reduce((s, r) => s + (parseFloat(r.total) || 0), 0) },
     { label: 'Hurto a Residencias', total: tryLoad('hurto_residencias_actual.json').reduce((s, r) => s + (parseFloat(r.total) || 0), 0) },
     { label: 'Motocicletas y Automotores', total: tryLoad('hurto.json').reduce((s, r) => s + (parseFloat(r.total) || 0), 0) },
     { label: 'Abigeato, Entidades Financieras y Piratería Terrestre', total: tryLoad('hurto_extra_actual.json').reduce((s, r) => s + (parseFloat(r.total) || 0), 0) },
+    { label: 'Hurto a Comercio', total: tryLoad('hurto_comercio_actual.json').reduce((s, r) => s + (parseFloat(r.total) || 0), 0) },
   ],
 };
 
@@ -251,12 +279,17 @@ const analitica = {
 function normalizeMuniKey(name) {
   return stripAccents(String(name)).toUpperCase().replace(/\s+/g, ' ').trim();
 }
+const filasSinMunicipio = [];
 function municipiosNacional(field, files) {
   const byMuniKey = {}; // "MUNICIPIO_NORM|DEPTOKEY" -> { municipio, deptoKey, total }
   files.forEach(file => {
     tryLoad(file + '.json').forEach(r => {
       const deptoKey = normalizeDeptoName(r.departamento);
       if (!byKey[deptoKey]) return; // descarta deptos no reconocidos ("Sin Información", etc.)
+      if (r.municipio === undefined || r.municipio === null || String(r.municipio).trim() === '') {
+        filasSinMunicipio.push(field + ' ' + deptoKey + ' ' + r.total);
+        return; // hechos sin municipio: siguen contando en el total departamental, no en el municipal
+      }
       const name = String(r.municipio).replace(/\s*\(CT\)\s*$/, '').trim();
       const k = normalizeMuniKey(name) + '|' + deptoKey;
       if (!byMuniKey[k]) byMuniKey[k] = { municipio: name, deptoKey, total: 0 };
@@ -265,11 +298,34 @@ function municipiosNacional(field, files) {
   });
   return byMuniKey;
 }
-function buildMunicipiosDetalle() {
-  const homi = municipiosNacional('homicidios', ['municipios_homicidio']);
-  const ext = municipiosNacional('extorsion', ['municipios_extorsion']);
-  const hurto = municipiosNacional('hurto', ['municipios_hurto_personas', 'municipios_hurto_residencias', 'municipios_hurto_vehiculos', 'municipios_hurto_extra']);
+// Categorías con detalle municipal (llave del dashboard -> sufijos de archivo municipios_<x> /
+// hist_municipio_<x>). Todas vienen de SIEDCO/DIJIN con columna de municipio. Los overlays
+// (feminicidios, capturas) se guardan por municipio pero NO suman al total municipal, igual que a
+// nivel departamental.
+const MUNI_CATS = {
+  homicidios: ['homicidio'],
+  secuestros: ['secuestro'],
+  extorsion: ['extorsion'],
+  amenazas: ['amenazas'],
+  delitos_sexuales: ['sexuales'],
+  lesiones: ['lesiones'],
+  hurto: ['hurto_personas', 'hurto_residencias', 'hurto_vehiculos', 'hurto_extra', 'hurto_comercio'],
+  violencia_intrafamiliar: ['violencia_intrafamiliar'],
+  terrorismo: ['terrorismo'],
+  estupefacientes: ['estupefacientes'],
+};
+const MUNI_OVERLAYS = { feminicidios: ['feminicidio'], capturas: ['capturas'] };
+const MUNI_FIELDS = Object.keys(MUNI_CATS);
+const MUNI_ALL_FIELDS = [...MUNI_FIELDS, ...Object.keys(MUNI_OVERLAYS)];
+function muniVacio(municipio) {
+  const m = { municipio, estadoDatos: {} };
+  MUNI_ALL_FIELDS.forEach(k => { m[k] = 0; });
+  MUNI_FIELDS.forEach(k => { m.estadoDatos[k] = 'no_reportado'; });
+  return m;
+}
+function muniTotal(m) { return MUNI_FIELDS.reduce((sum, k) => sum + (m[k] || 0), 0); }
 
+function buildMunicipiosDetalle() {
   const byDepto = {};
   DEPARTAMENTOS.forEach(d => { byDepto[d.key] = {}; });
   function merge(src, field) {
@@ -277,18 +333,19 @@ function buildMunicipiosDetalle() {
       const bucket = byDepto[m.deptoKey];
       if (!bucket) return;
       const muniKey = normalizeMuniKey(m.municipio);
-      if (!bucket[muniKey]) bucket[muniKey] = { municipio: m.municipio, homicidios: 0, extorsion: 0, hurto: 0 };
+      if (!bucket[muniKey]) bucket[muniKey] = muniVacio(m.municipio);
       bucket[muniKey][field] = m.total;
+      if (MUNI_CATS[field]) bucket[muniKey].estadoDatos[field] = 'observado';
     });
   }
-  merge(homi, 'homicidios');
-  merge(ext, 'extorsion');
-  merge(hurto, 'hurto');
+  Object.entries({ ...MUNI_CATS, ...MUNI_OVERLAYS }).forEach(([field, sufijos]) => {
+    merge(municipiosNacional(field, sufijos.map(x => 'municipios_' + x)), field);
+  });
 
   const result = {};
   DEPARTAMENTOS.forEach(d => {
     result[d.key] = Object.values(byDepto[d.key])
-      .map(m => ({ ...m, total: m.homicidios + m.extorsion + m.hurto }))
+      .map(m => ({ ...m, total: muniTotal(m) }))
       .sort((a, b) => b.total - a.total);
   });
   return result;
@@ -315,25 +372,24 @@ function municipioHistorico(files) {
   });
   return byMuniKey;
 }
-const historicoMunicipal = {
-  homicidios: municipioHistorico(['homicidio']),
-  extorsion: municipioHistorico(['extorsion']),
-  hurto: municipioHistorico(['hurto_personas', 'hurto_residencias', 'hurto_vehiculos', 'hurto_extra']),
-};
+const historicoMunicipal = Object.fromEntries(Object.entries(MUNI_CATS).map(([k, sufijos]) => [k, municipioHistorico(sufijos)]));
+// Overlays aparte: la app deriva sus categorías municipales de las llaves de historicoMunicipal y
+// las suma en el total, así que capturas/feminicidios no pueden vivir ahí.
+const historicoMunicipalOverlay = Object.fromEntries(Object.entries(MUNI_OVERLAYS).map(([k, sufijos]) => [k, municipioHistorico(sufijos)]));
 
 // -------- Gap-fill: Medicina Legal (INMLCF) para municipios que SIEDCO NUNCA reporta --------
-// Ver detalle completo en fetch_raw.js (sección 11) y ESTADO_SESION.md del repo CrimenAi ("Ronda —
-// Amazonía colombiana: municipios en cero rellenados con Medicina Legal"). Confirmado consultando
-// m8fd-ahd9 SIN filtro de año: en Amazonas/Guainía/Vaupés, SIEDCO no tiene NI UNA fila histórica
-// (2003-2026) para varios de sus municipios/corregimientos departamentales -- no es un hueco del
-// periodo actual, es una ausencia sistemática y total. Se rellenan con el registro real de
-// homicidios de Medicina Legal (INMLCF: "Presuntos Homicidios 2015-2024, cifras definitivas" +
-// "Lesiones fatales de causa externa, información preliminar ene-2025 a jun-2026"), la fuente
-// forense primaria de homicidios en Colombia. SOLO se usa para los municipios que SIEDCO deja
-// COMPLETAMENTE vacíos (nunca sobrescribe uno que ya tenga fila real de SIEDCO, para no mezclar 2
-// metodologías de conteo - hecho policial vs. dictamen forense - en el mismo número). Extorsión/
-// hurto quedan en 0 para estos municipios porque Medicina Legal no cubre esas categorías (no es que
-// se hayan verificado en cero - queda documentado en notaFuente de cada municipio afectado).
+// Ver detalle completo en fetch_raw.js (sección 11) y ESTADO_SESION.md ("Ronda — Amazonía
+// colombiana: municipios en cero rellenados con Medicina Legal"). Confirmado consultando m8fd-ahd9
+// SIN filtro de año: en Amazonas/Guainía/Vaupés, SIEDCO no tiene NI UNA fila histórica (2003-2026)
+// para 17 de sus 26 municipios/corregimientos departamentales -- no es un hueco del periodo actual,
+// es una ausencia sistemática y total. Se rellenan con el registro real de homicidios de Medicina
+// Legal (INMLCF: "Presuntos Homicidios 2015-2024, cifras definitivas" + "Lesiones fatales de causa
+// externa, información preliminar ene-2025 a jun-2026"), la fuente forense primaria de homicidios
+// en Colombia. SOLO se usa para los municipios que SIEDCO deja COMPLETAMENTE vacíos (nunca
+// sobrescribe uno que ya tenga fila real de SIEDCO, para no mezclar 2 metodologías de conteo -
+// hecho policial vs. dictamen forense - en el mismo número). Extorsión/hurto quedan en 0 para estos
+// municipios porque Medicina Legal no cubre esas categorías (no es que se hayan verificado en cero
+// - queda documentado en notaFuente de cada municipio afectado).
 const MEDLEGAL_DEPTOS = new Set(['AMAZONAS', 'GUAINIA', 'VAUPES']);
 function medlegalRows(file) {
   return tryLoad(file + '.json')
@@ -349,15 +405,16 @@ const medlegalHomicidios = [
   ...medlegalRows('medlegal_homicidio_amazonia_historico'),
   ...medlegalRows('medlegal_homicidio_amazonia_preliminar'),
 ];
-// Agrupa por municipio: total del periodo actual (2025+2026, mismo criterio que el resto del
-// dashboard) + serie completa por año (para historicoMunicipal).
+// Agrupa por municipio: total del año vigente + serie completa por año (para
+// historicoMunicipal). En esta fuente forense, ausencia de fila para un municipio cubierto en el
+// año vigente se interpreta como cero verificado; extorsión/hurto siguen como no reportados.
 const medlegalByMuni = {}; // "MUNIKEY|DEPTOKEY" -> { municipio, deptoKey, actual, byYear }
 medlegalHomicidios.forEach(r => {
   const muniKey = normalizeMuniKey(r.municipio) + '|' + r.deptoKey;
   if (!medlegalByMuni[muniKey]) medlegalByMuni[muniKey] = { municipio: r.municipio, deptoKey: r.deptoKey, actual: 0, byYear: {} };
   const bucket = medlegalByMuni[muniKey];
   bucket.byYear[r.anio] = (bucket.byYear[r.anio] || 0) + r.total;
-  if (r.anio === '2025' || r.anio === '2026') bucket.actual += r.total;
+  if (r.anio === String(CURRENT_YEAR)) bucket.actual += r.total;
 });
 
 let municipiosRellenadosMedLegal = 0;
@@ -368,15 +425,13 @@ Object.values(medlegalByMuni).forEach(({ municipio, deptoKey, actual, byYear }) 
   if (!lista) return;
   const yaExiste = lista.some(m => normalizeMuniKey(m.municipio) === muniKeyNorm);
   if (yaExiste) return; // SIEDCO ya tiene fila real para este municipio, no se toca
-  lista.push({
-    municipio,
-    homicidios: actual,
-    extorsion: 0,
-    hurto: 0,
-    total: actual,
-    fuenteHomicidios: 'medicina_legal',
-    notaFuente: 'SIEDCO (Policía Nacional) no ha reportado nunca un hecho en este municipio (verificado en toda su serie histórica 2003-2026). Homicidios tomados del registro de Medicina Legal (INMLCF), la fuente forense primaria. Extorsión/hurto en 0 porque Medicina Legal no cubre esas categorías, no porque se hayan verificado en cero.',
-  });
+  const fila = muniVacio(municipio);
+  fila.homicidios = actual;
+  fila.total = actual;
+  fila.estadoDatos.homicidios = actual > 0 ? 'observado_fuente_alterna' : 'cero_verificado';
+  fila.fuenteHomicidios = 'medicina_legal';
+  fila.notaFuente = 'SIEDCO (Policía Nacional) no ha reportado nunca un hecho en este municipio (verificado en toda su serie histórica 2003-2026). Homicidios tomados del registro de Medicina Legal (INMLCF), la fuente forense primaria. Las demás categorías en 0 porque Medicina Legal no las cubre, no porque se hayan verificado en cero.';
+  lista.push(fila);
   municipiosRellenadosMedLegal++;
   // Histórico municipal: solo agrega la serie si SIEDCO tampoco tiene histórico para esta llave.
   if (historicoMunicipal.homicidios[compoundKey] === undefined) {
@@ -420,7 +475,12 @@ poblacionMunicipios.forEach(r => {
   const deptoKey = normalizeDeptoName(r.departamento);
   if (!byKey[deptoKey]) return;
   const n = normalizeMuniName(r.municipio);
-  (poblacionCandidatosPorDepto[deptoKey] = poblacionCandidatosPorDepto[deptoKey] || []).push({ n, ns: n.replace(/ /g, ''), poblacion: parseFloat(r.poblacion) || 0 });
+  (poblacionCandidatosPorDepto[deptoKey] = poblacionCandidatosPorDepto[deptoKey] || []).push({
+    n,
+    ns: n.replace(/ /g, ''),
+    divipola: String(r.divipola),
+    poblacion: parseFloat(r.poblacion) || 0,
+  });
 });
 
 function tasaPor100k(total, poblacion) {
@@ -433,34 +493,129 @@ const MUNI_NAME_ALIASES = {
   'SANTA CRUZ DE MOMPOX': 'MOMPOS',
   'SAN ANDRES DE SOTAVENTO': 'SAN ANDRES SOTAVENTO',
   'CHIVOLO': 'CHIBOLO',
+  'CERRO SAN ANTONIO': 'CERRO DE SAN ANTONIO',
 };
-function buscarPoblacionMuni(deptoKey, municipioNombre) {
+// Nombres SIEDCO ambiguos dentro de un departamento (la coincidencia parcial encontraría varios).
+const MUNI_NAME_ALIASES_POR_DEPTO = {
+  'ANTIOQUIA|SAN PEDRO': 'SAN PEDRO DE LOS MILAGROS',
+};
+function buscarRegistroPoblacion(deptoKey, municipioNombre) {
   const candidatos = poblacionCandidatosPorDepto[deptoKey] || [];
   let n = normalizeMuniName(municipioNombre);
-  n = MUNI_NAME_ALIASES[n] || n;
+  n = MUNI_NAME_ALIASES_POR_DEPTO[deptoKey + '|' + n] || MUNI_NAME_ALIASES[n] || n;
   const ns = n.replace(/ /g, '');
   let hit = candidatos.find(c => c.n === n) || candidatos.find(c => c.ns === ns);
   if (!hit) {
     const parciales = candidatos.filter(c => c.n.includes(n) || n.includes(c.n) || c.ns.includes(ns) || ns.includes(c.ns));
     if (parciales.length === 1) hit = parciales[0];
   }
-  return hit ? hit.poblacion : null;
+  return hit || null;
 }
 
-let municipiosConPoblacion = 0;
-let municipiosSinPoblacion = 0;
+// 1) Cruce difuso SIEDCO <-> DANE: asigna población y código DIVIPOLA a cada municipio con datos.
 Object.entries(municipiosDetalle).forEach(([deptoKey, munis]) => {
   munis.forEach(m => {
-    const poblacion = buscarPoblacionMuni(deptoKey, m.municipio);
-    m.poblacion = poblacion;
-    m.tasaPor100k = tasaPor100k(m.total, poblacion);
-    if (poblacion) municipiosConPoblacion++; else municipiosSinPoblacion++;
+    const registro = buscarRegistroPoblacion(deptoKey, m.municipio);
+    m.poblacion = registro ? registro.poblacion : null;
+    m.divipola = m.divipola || (registro && registro.divipola) || null;
+    m.estadoDatos = m.estadoDatos || Object.fromEntries(MUNI_FIELDS.map(k => [k, m[k] > 0 ? 'observado' : 'no_reportado']));
   });
+});
+
+// 1b) Fusiona filas del mismo municipio que llegaron con nombres distintos según el dataset (ej. hurto
+// de vehículos escribe "Cartagena (CT)" y los demás "CARTAGENA DE INDIAS"): sin esto el municipio
+// aparecía partido en dos filas y la principal mostraba cifras incompletas.
+let municipiosFusionados = 0;
+Object.keys(municipiosDetalle).forEach(deptoKey => {
+  const porCodigo = new Map();
+  const resultado = [];
+  municipiosDetalle[deptoKey].forEach(m => {
+    const previo = m.divipola && porCodigo.get(m.divipola);
+    if (!previo) { if (m.divipola) porCodigo.set(m.divipola, m); resultado.push(m); return; }
+    const [principal, otro] = m.total > previo.total ? [m, previo] : [previo, m];
+    MUNI_ALL_FIELDS.forEach(campo => {
+      principal[campo] = (principal[campo] || 0) + (otro[campo] || 0);
+      if (otro.estadoDatos && otro.estadoDatos[campo] && otro.estadoDatos[campo] !== 'no_reportado'
+          && (!principal.estadoDatos[campo] || principal.estadoDatos[campo] === 'no_reportado')) {
+        principal.estadoDatos[campo] = otro.estadoDatos[campo];
+      }
+    });
+    principal.total = muniTotal(principal);
+    principal.alias = [...new Set([...(principal.alias || []), otro.municipio, ...(otro.alias || [])])];
+    if (principal !== previo) { resultado[resultado.indexOf(previo)] = principal; porCodigo.set(m.divipola, principal); }
+    municipiosFusionados++;
+  });
+  municipiosDetalle[deptoKey] = resultado;
+});
+if (filasSinMunicipio.length) console.log('Filas SIEDCO sin municipio (solo cuentan en el total departamental): ' + filasSinMunicipio.join('; '));
+console.log('Fusión por DIVIPOLA: ' + municipiosFusionados + ' filas duplicadas (mismo municipio, distinto nombre por dataset) unificadas.');
+// Misma unificación en la serie histórica: la llave de un alias se suma a la del nombre principal.
+let seriesHistoricasFusionadas = 0;
+Object.entries(municipiosDetalle).forEach(([deptoKey, munis]) => {
+  munis.filter(m => m.alias).forEach(m => {
+    const principalKey = normalizeMuniKey(m.municipio) + '|' + deptoKey;
+    m.alias.forEach(alias => {
+      const aliasKey = normalizeMuniKey(String(alias).replace(/\s*\(CT\)\s*$/, '').trim()) + '|' + deptoKey;
+      if (aliasKey === principalKey) return;
+      [...Object.values(historicoMunicipal), ...Object.values(historicoMunicipalOverlay)].forEach(serie => {
+        if (!serie[aliasKey]) return;
+        const destino = serie[principalKey] = serie[principalKey] || {};
+        Object.entries(serie[aliasKey]).forEach(([anio, total]) => { destino[anio] = (destino[anio] || 0) + total; });
+        delete serie[aliasKey];
+        seriesHistoricasFusionadas++;
+      });
+    });
+  });
+});
+console.log('Histórico municipal: ' + seriesHistoricasFusionadas + ' series de alias sumadas a su municipio principal.');
+
+// 2) Catálogo territorial completo, por código DIVIPOLA (no por nombre: SIEDCO escribe "CARTAGENA DE
+// INDIAS" o "CUCUTA" donde DANE dice "Cartagena" o "San José de Cúcuta"). Un municipio DANE sin
+// ninguna fila en las fuentes vigentes se materializa con estado "no_reportado": nunca desaparece ni se
+// convierte silenciosamente en un cero observado. DANE 2025 tiene 1.123 municipios; el más reciente,
+// Nuevo Belén de Bajirá (27493), todavía no está en la geometría HDX de 1.122 features.
+const divipolasPresentes = new Set(Object.values(municipiosDetalle).flat().map(m => m.divipola).filter(Boolean));
+let municipiosCatalogoAgregados = 0;
+poblacionMunicipios.forEach(r => {
+  const deptoKey = normalizeDeptoName(r.departamento);
+  const divipola = String(r.divipola);
+  if (divipolasPresentes.has(divipola)) return;
+  const lista = municipiosDetalle[deptoKey] = municipiosDetalle[deptoKey] || [];
+  lista.push({ ...muniVacio(r.municipio), divipola, total: 0, poblacion: parseFloat(r.poblacion) || null });
+  divipolasPresentes.add(divipola);
+  municipiosCatalogoAgregados++;
+});
+
+// 3) Tasas, estado de cobertura y orden.
+let municipiosConPoblacion = 0;
+let municipiosSinPoblacion = 0;
+Object.values(municipiosDetalle).forEach(munis => {
+  munis.forEach(m => {
+    m.tasaPor100k = tasaPor100k(m.total, m.poblacion);
+    // SIEDCO es un registro de hechos: si cubre el municipio (tiene filas en alguna categoría) y no
+    // trae fila en otra, es "sin_registro" (la fuente no registró hechos), distinto de
+    // "no_reportado" (la fuente no cubre el municipio). Los rellenos de Medicina Legal no cuentan
+    // como cobertura SIEDCO: sus otras categorías siguen siendo no_reportado.
+    const cubiertoPorSiedco = !m.fuenteHomicidios && MUNI_FIELDS.some(k => m.estadoDatos[k] === 'observado');
+    if (cubiertoPorSiedco) {
+      MUNI_FIELDS.forEach(k => { if (m.estadoDatos[k] === 'no_reportado') m.estadoDatos[k] = 'sin_registro'; });
+    }
+    const statuses = Object.values(m.estadoDatos || {});
+    const cubiertas = statuses.filter(status => status !== 'no_reportado').length;
+    m.estadoCobertura = cubiertas === 0 ? 'no_reportado' : (cubiertas === statuses.length ? 'completo' : 'parcial');
+    if (m.poblacion) municipiosConPoblacion++; else municipiosSinPoblacion++;
+  });
+  munis.sort((a, b) => b.total - a.total || a.municipio.localeCompare(b.municipio, 'es'));
 });
 const totalMunicipiosDetalle = municipiosConPoblacion + municipiosSinPoblacion;
 const pctCruzados = totalMunicipiosDetalle ? ((municipiosConPoblacion / totalMunicipiosDetalle) * 100).toFixed(1) : '0.0';
+const coberturaMunicipal = Object.values(municipiosDetalle).flat().reduce((acc, municipio) => {
+  acc[municipio.estadoCobertura] = (acc[municipio.estadoCobertura] || 0) + 1;
+  return acc;
+}, { catalogoDane: poblacionMunicipios.length, materializados: totalMunicipiosDetalle });
 console.log(`Población DANE: ${poblacionMunicipios.length} municipios cargados desde poblacion_municipios.json.`);
 console.log(`Cruce municipiosDetalle <-> población: ${municipiosConPoblacion}/${totalMunicipiosDetalle} municipios (${pctCruzados}%) SÍ cruzaron; ${municipiosSinPoblacion} NO cruzaron (poblacion:null, tasaPor100k:null).`);
+console.log(`Catálogo completo: ${totalMunicipiosDetalle} municipios materializados; ${municipiosCatalogoAgregados} agregados explícitamente como no_reportado.`);
 if (totalMunicipiosDetalle && municipiosSinPoblacion / totalMunicipiosDetalle > 0.15) {
   console.error('ADVERTENCIA: más del 15% de los municipios NO cruzaron con población DANE. Revisar normalizeMuniName / nombres SIEDCO vs DANE.');
 }
@@ -552,12 +707,14 @@ const noticias = [
 
 const output = {
   meta: {
-    fuente: 'Policía Nacional de Colombia (SIEDCO) vía datos.gov.co + Fiscalía General de la Nación (SPOA) para delitos informáticos, procesos y víctimas + Instituto Nacional de Medicina Legal y Ciencias Forenses (SIRDEC) para personas desaparecidas y para homicidios en municipios amazónicos que SIEDCO nunca reporta',
-    periodoActual: 'Enero 2025 - Mayo 2026 (mayo parcial)',
+    fuente: 'Policía Nacional de Colombia (SIEDCO) vía datos.gov.co + DIJIN/Policía Nacional (reporte de capturas 3jdh-nmwu) + Fiscalía General de la Nación (SPOA) para delitos informáticos, procesos y víctimas + Instituto Nacional de Medicina Legal y Ciencias Forenses (SIRDEC) para personas desaparecidas y para homicidios en municipios amazónicos que SIEDCO nunca reporta + Centro Nacional de Memoria Histórica (SIEVCAC) para víctimas de minas antipersonal',
+    poblacionFuente: 'DANE 2025',
+    periodoActual: `Año ${CURRENT_YEAR} (YTD; el corte exacto puede variar por fuente)`,
     rangoHistorico: { min: anioGlobalMin, max: anioGlobalMax },
     rangoAnios,
+    coberturaMunicipal,
     generado: new Date().toISOString(),
-    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 4 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre). Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle).',
+    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 4 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre). Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
   },
   categorias: CATS,
   categoriasOverlay: CATS_OVERLAY,
@@ -572,6 +729,7 @@ const output = {
   desaparecidosUBPD,
   municipiosDetalle,
   historicoMunicipal,
+  historicoMunicipalOverlay,
   analitica,
   noticias,
 };

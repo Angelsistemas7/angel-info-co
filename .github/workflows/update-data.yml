@@ -45,8 +45,16 @@ jobs:
         run: node fetch_poblacion.js
         working-directory: data
 
-      - name: Fusionar datos (10 categorías SIEDCO)
+      - name: Fusionar datos (10 categorías SIEDCO, detalle municipal completo)
         run: node merge.js
+        working-directory: data
+
+      - name: Pruebas del pipeline
+        run: node test_pipeline_config.js && node test_fetch_raw_pagination.js
+        working-directory: data
+
+      - name: Validar salida (33 deptos, 1.123 municipios DANE, totales = histórico, municipios <= depto)
+        run: node validate_output.js
         working-directory: data
 
       - name: Aplicar parche Fiscalía (SPOA) + Medicina Legal (SIRDEC)

@@ -10,9 +10,9 @@
 
 const fs = require('fs');
 const path = __dirname;
+const { CURRENT_YEAR, CURRENT_YEARS } = require('./pipeline_config');
 
 const BASE = 'https://www.datos.gov.co/resource/';
-const CURRENT_YEARS = ['2025', '2026']; // periodo "actual" del dashboard (ver README/merge.js)
 
 let okCount = 0;
 let failCount = 0;
@@ -49,15 +49,40 @@ async function soql(datasetId, params, attempt = 1) {
   return json;
 }
 
+// Socrata recorta silenciosamente las respuestas al valor de $limit. Para consultas agrupadas
+// grandes (especialmente municipio x año), una única petición no permite distinguir "resultado
+// completo" de "primeras N filas". Esta variante pagina con un orden estable y falla de forma
+// explícita si alcanza el tope de seguridad, en vez de publicar un histórico truncado.
+async function soqlAll(datasetId, params, options = {}) {
+  if (!params.$order) throw new Error('soqlAll requiere $order estable para paginar ' + datasetId);
+  const pageSize = options.pageSize || 10000;
+  const maxPages = options.maxPages || 100;
+  const rows = [];
+
+  for (let page = 0; page < maxPages; page++) {
+    const chunk = await soql(datasetId, {
+      ...params,
+      $limit: pageSize,
+      $offset: page * pageSize,
+    });
+    rows.push(...chunk);
+    if (chunk.length < pageSize) return rows;
+  }
+
+  throw new Error(`paginación excedió ${maxPages} páginas de ${pageSize} filas para ${datasetId}`);
+}
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // Cada fuente SIEDCO (Policía Nacional) tiene un formato de fecha distinto en `fecha_hecho`:
 // "iso"  -> timestamp real (2026-05-25T00:00:00.000), se puede usar date_extract_y().
 // "text" -> texto libre "DD/MM/AAAA", hay que extraer el año con substring(campo,7,4).
 function yearExpr(src) {
+  if (src.dateType === 'yearfield') return src.dateField; // el dataset ya trae el año en un campo texto propio (ej. SIEVCAC "a_o"), sin fecha completa que parsear
   return src.dateType === 'iso' ? `date_extract_y(${src.dateField})` : `substring(${src.dateField},7,4)`;
 }
 function yearEquals(src, year) {
+  if (src.dateType === 'yearfield') return `${src.dateField}='${year}'`;
   return src.dateType === 'iso' ? `${yearExpr(src)}=${year}` : `${yearExpr(src)}='${year}'`;
 }
 function currentPeriodWhere(src, extra) {
@@ -83,6 +108,10 @@ const SRC = {
   hurto_personas: { id: '4rxi-8m8d', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   hurto_residencias: { id: '7mn7-vzqp', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   hurto: { id: '9vha-vh9n', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' }, // motos/autos
+  // Hurto a comercio (MinDefensa, copia de SIEDCO con fecha ISO y código DANE): única modalidad de hurto
+  // que no entraba en ninguna subfuente (26.331 hechos en 2025). Sin doble conteo con personas/residencias:
+  // el dataset DIPON 6sqw-8cg5 las separa como tipo_de_hurto distintos (ver investigacion/co-fuentes-extra).
+  hurto_comercio: { id: '7i2x-h5vp', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   hurto_extra: { id: 'd4fr-sbn2', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' }, // abigeato+financiero+pirateria
   sexuales: { id: 'fpe5-yrmw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', delito: 'delito', genero: 'genero', grupo_etario: 'grupo_etario' },
   violencia_intrafamiliar: { id: 'vuyt-mqpw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', genero: 'genero', grupo_etario: 'grupo_etario' },
@@ -91,6 +120,21 @@ const SRC = {
   terrorismo: { id: '37p5-impc', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   estupefacientes: { id: 'kk69-w2jj', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', clase_bien: 'clase_bien', aggType: 'count' },
   feminicidio: { id: 'm8fd-ahd9', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "spoa_caracterizacion='FEMINICIDIO'" },
+  // Víctimas de minas antipersonal/MUSE/AEI -- Centro Nacional de Memoria Histórica (CNMH), Sistema
+  // de Información de Eventos de Violencia del Conflicto Armado (SIEVCAC), dataset 52eu-ic7d. Cada
+  // fila = 1 persona víctima (no un conteo de hechos), por eso aggType 'count' igual que
+  // estupefacientes. Se probó primero el dataset "oficial" de Presidencia/AICMA (yhxn-eqqw) pero
+  // dejó de actualizarse en 2024-01; SIEVCAC sí tiene corte reciente (31-03-2026, ver meta.nota).
+  minas_antipersonal: { id: '52eu-ic7d', dateType: 'yearfield', dateField: 'a_o', depto: 'departamento', muni: 'municipio', aggType: 'count', condicion: 'calidad_de_la_v_ctima_o_la', situacion: 'situaci_n_actual_de_la_v' },
+  // Capturas (personas detenidas en operativos, flagrancia u orden judicial) -- DIJIN/Policía
+  // Nacional, dataset 3jdh-nmwu "Reporte Capturas Policía Nacional" (ver ESTADO_SESION.md,
+  // "Ronda — Colombia: capturados/dados de baja..."). Serie viva 2010-01-01 a 2026-07-31
+  // (corte 2026-08-31), ~3,75M de filas. fecha_hecho en texto "DD/MM/AAAA" (dateType 'text',
+  // igual que hurto). `cantidad` = personas capturadas por fila (conteo, se suma). Desagrega por
+  // departamento + municipio (+ codigo_dane) y trae conducta (artículo penal), genero y
+  // grupo_etario. NO es un delito denunciado (naturaleza distinta, igual que aprehensiones de
+  // Costa Rica): en merge.js va como categoría overlay, no suma al total nacional.
+  capturas: { id: '3jdh-nmwu', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
 };
 
 // -------- Tareas: cada una produce un archivo data/<nombre>.json --------
@@ -98,7 +142,9 @@ const tasks = [];
 
 function addTask(name, fn) { tasks.push({ name, fn }); }
 
-// 1) Periodo actual (2025-2026) por departamento -- 11 archivos usados por applyCurrentPeriod()
+// 1) Año vigente por departamento -- archivos usados por applyCurrentPeriod(). Nunca se mezclan
+// dos años en una misma cifra "actual"; el año puede fijarse para reproducción con
+// CRIMENAI_CURRENT_YEAR=2026.
 const CURRENT_FILES = {
   homicidio: SRC.homicidio,
   secuestro: SRC.secuestro,
@@ -110,7 +156,9 @@ const CURRENT_FILES = {
   hurto_residencias_actual: SRC.hurto_residencias,
   hurto: SRC.hurto,
   hurto_extra_actual: SRC.hurto_extra,
+  hurto_comercio_actual: SRC.hurto_comercio,
   feminicidio_actual: SRC.feminicidio,
+  capturas: SRC.capturas,
 };
 Object.entries(CURRENT_FILES).forEach(([file, src]) => {
   addTask(file, async () => {
@@ -129,9 +177,11 @@ Object.entries(CURRENT_FILES).forEach(([file, src]) => {
 const HIST_SOURCES = {
   homicidio: SRC.homicidio, secuestro: SRC.secuestro, extorsion: SRC.extorsion, amenazas: SRC.amenazas,
   sexuales: SRC.sexuales, lesiones: SRC.lesiones, hurto_personas: SRC.hurto_personas,
-  hurto_residencias: SRC.hurto_residencias, hurto: SRC.hurto, hurto_extra: SRC.hurto_extra,
+  hurto_residencias: SRC.hurto_residencias, hurto: SRC.hurto, hurto_extra: SRC.hurto_extra, hurto_comercio: SRC.hurto_comercio,
   violencia_intrafamiliar: SRC.violencia_intrafamiliar, terrorismo: SRC.terrorismo,
   estupefacientes: SRC.estupefacientes, feminicidio: SRC.feminicidio,
+  minas_antipersonal: SRC.minas_antipersonal,
+  capturas: SRC.capturas,
 };
 Object.entries(HIST_SOURCES).forEach(([file, src]) => {
   addTask('hist_depto_' + file, async () => {
@@ -171,7 +221,7 @@ Object.entries(HIST_SOURCES).forEach(([file, src]) => {
   });
 });
 
-// 5) Top municipios (periodo actual 2025-2026), top 15
+// 5) Top municipios (año vigente), top 15
 const TOP_MUNI_FILES = {
   homicidio: SRC.homicidio, extorsion: SRC.extorsion, hurto_personas: SRC.hurto_personas,
   hurto_residencias: SRC.hurto_residencias, hurto: SRC.hurto, amenazas: SRC.amenazas, lesiones: SRC.lesiones,
@@ -189,7 +239,7 @@ Object.entries(TOP_MUNI_FILES).forEach(([file, src]) => {
   });
 });
 
-// 6) Desgloses demográficos / por modalidad (periodo actual 2025-2026)
+// 6) Desgloses demográficos / por modalidad (año vigente)
 addTask('homicidio_arma', () => breakdown(SRC.homicidio, 'arma_medio', 'label'));
 addTask('homicidio_sexo', () => breakdown(SRC.homicidio, 'sexo', 'label'));
 addTask('homicidio_modalidad', () => breakdown(SRC.homicidio, '_modalidad_presunta', 'label'));
@@ -200,6 +250,11 @@ addTask('vif_genero', () => breakdown(SRC.violencia_intrafamiliar, 'genero', 'la
 addTask('vif_grupo_etario', () => breakdown(SRC.violencia_intrafamiliar, 'grupo_etario', 'label'));
 addTask('secuestro_tipo', () => breakdown(SRC.secuestro, 'tipo_delito', 'label'));
 addTask('estupefacientes_tipo', () => breakdown(SRC.estupefacientes, 'clase_bien', 'label'));
+addTask('minas_condicion', () => breakdown(SRC.minas_antipersonal, SRC.minas_antipersonal.condicion, 'label'));
+addTask('minas_situacion', () => breakdown(SRC.minas_antipersonal, SRC.minas_antipersonal.situacion, 'label'));
+addTask('capturas_conducta', () => breakdown(SRC.capturas, 'descripcion_conducta_captura', 'label'));
+addTask('capturas_genero', () => breakdown(SRC.capturas, 'genero', 'label'));
+addTask('capturas_grupo_etario', () => breakdown(SRC.capturas, 'grupo_etario', 'label'));
 
 async function breakdown(src, field, outKey) {
   const rows = await soql(src.id, {
@@ -213,7 +268,7 @@ async function breakdown(src, field, outKey) {
 }
 
 // 7) Municipios completos, TODOS los 33 departamentos (homicidio, extorsion, hurto=4 subfuentes),
-// periodo actual 2025-2026. Alimenta municipiosDetalle en merge.js (~1.122 municipios).
+// año vigente. Alimenta municipiosDetalle en merge.js (~1.122 municipios).
 // hurto se compone de las mismas 4 subfuentes que HURTO_SUBFUENTES en merge.js (personas,
 // residencias, vehículos, abigeato+financiero+pirateria) para ser consistente con el total
 // nacional de "hurto" del resto del dashboard.
@@ -224,6 +279,7 @@ const MUNI_NACIONAL_FILES = {
   municipios_hurto_residencias: SRC.hurto_residencias,
   municipios_hurto_vehiculos: SRC.hurto,
   municipios_hurto_extra: SRC.hurto_extra,
+  municipios_hurto_comercio: SRC.hurto_comercio,
 };
 Object.entries(MUNI_NACIONAL_FILES).forEach(([file, src]) => {
   addTask(file, async () => {
@@ -240,17 +296,48 @@ Object.entries(MUNI_NACIONAL_FILES).forEach(([file, src]) => {
 // 7b) Histórico municipal anual (homicidio, extorsión, hurto=4 subfuentes), mismas fuentes que (7)
 // pero agrupado también por año. Alimenta historicoMunicipal en merge.js, para poder comparar
 // municipios en el tiempo (no solo el periodo actual) y calcular el Índice de Seguridad a nivel
-// municipio. $limit alto porque son hasta ~1.122 municipios x ~24 años.
+// municipio. El resultado puede superar 20.000 grupos, por lo que DEBE paginarse; el límite fijo
+// anterior truncaba silenciosamente algunas fuentes exactamente en 20.000 filas.
 Object.entries(MUNI_NACIONAL_FILES).forEach(([file, src]) => {
   addTask('hist_municipio_' + file.replace(/^municipios_/, ''), async () => {
-    const rows = await soql(src.id, {
+    const rows = await soqlAll(src.id, {
       $select: `${src.muni} as municipio, ${src.depto} as departamento, ${yearExpr(src)} as anio, ${aggExpr(src)} as total`,
       $where: src.extraWhere || undefined,
       $group: `${src.muni}, ${src.depto}, anio`,
-      $limit: 20000,
+      $order: 'departamento, municipio, anio',
     });
     return rows;
   });
+});
+
+// 7c) Las demás categorías a nivel municipal (año vigente + histórico anual paginado). Todas las
+// fuentes SIEDCO/DIJIN traen columna de municipio; antes solo se descargaban homicidio, extorsión y
+// hurto, por lo que el detalle municipal quedaba "parcial" en 7 de las 10 categorías del dashboard.
+// Nombres de archivo: municipios_<cat>.json y hist_municipio_<cat>.json (misma forma que 7/7b).
+const MUNI_EXTRA_FILES = {
+  municipios_secuestro: SRC.secuestro,
+  municipios_amenazas: SRC.amenazas,
+  municipios_sexuales: SRC.sexuales,
+  municipios_lesiones: SRC.lesiones,
+  municipios_violencia_intrafamiliar: SRC.violencia_intrafamiliar,
+  municipios_terrorismo: SRC.terrorismo,
+  municipios_estupefacientes: SRC.estupefacientes,
+  municipios_feminicidio: SRC.feminicidio,
+  municipios_capturas: SRC.capturas,
+};
+Object.entries(MUNI_EXTRA_FILES).forEach(([file, src]) => {
+  addTask(file, async () => soqlAll(src.id, {
+    $select: `${src.muni} as municipio, ${src.depto} as departamento, ${aggExpr(src)} as total`,
+    $where: currentPeriodWhere(src, src.extraWhere),
+    $group: `${src.muni}, ${src.depto}`,
+    $order: 'departamento, municipio',
+  }));
+  addTask('hist_municipio_' + file.replace(/^municipios_/, ''), async () => soqlAll(src.id, {
+    $select: `${src.muni} as municipio, ${src.depto} as departamento, ${yearExpr(src)} as anio, ${aggExpr(src)} as total`,
+    $where: src.extraWhere || undefined,
+    $group: `${src.muni}, ${src.depto}, anio`,
+    $order: 'departamento, municipio, anio',
+  }));
 });
 
 // 8) Delitos informáticos (Fiscalía / SPOA) -- dataset wxd8-ucns, ya pre-agregado (campo total_procesos)
@@ -311,14 +398,13 @@ addTask('desaparecidos_sexo', async () => soql(DESAP_ID, {
 }));
 
 // 11) Homicidios Medicina Legal (INMLCF) para el hueco real de SIEDCO en Amazonas/Guainía/Vaupés
-// -- ver ESTADO_SESION.md del repo CrimenAi ("Ronda — Amazonía colombiana...") para el detalle
-// completo de por qué hace falta esta fuente aparte. SIEDCO (Policía Nacional) NUNCA ha registrado,
-// en toda su serie histórica (2003-2026), ni un solo hecho de homicidio/extorsión/hurto en 11-17 de
-// los 26 municipios/corregimientos departamentales de estos 3 departamentos -- no es un hueco del
-// periodo actual, es una ausencia total y sistemática (confirmado consultando m8fd-ahd9 sin filtro
-// de año). Medicina Legal SÍ los desagrega, porque registra cada muerte violenta que dictamina sin
-// importar cuán pequeño sea el municipio. Se usan las 2 fuentes oficiales de Medicina Legal en
-// datos.gov.co:
+// -- ver ESTADO_SESION.md ("Ronda — Amazonía colombiana...") para el detalle completo de por qué
+// hace falta esta fuente aparte. SIEDCO (Policía Nacional) NUNCA ha registrado, en toda su serie
+// histórica (2003-2026), ni un solo hecho de homicidio/extorsión/hurto en 17 de los 26 municipios/
+// corregimientos departamentales de estos 3 departamentos -- no es un hueco del periodo actual, es
+// una ausencia total y sistemática (confirmado consultando m8fd-ahd9 sin filtro de año). Medicina
+// Legal SÍ los desagrega, porque registra cada muerte violenta que dictamina sin importar cuán
+// pequeño sea el municipio. Se usan las 2 fuentes oficiales de Medicina Legal en datos.gov.co:
 // - vtub-3de2 "Presuntos Homicidios. Colombia, 2015 a 2024. Cifras definitivas"
 // - 2kpj-cktv "Lesiones fatales de causa externa - Información preliminar - enero 2025 a junio 2026"
 //   (aquí se filtra manera_de_muerte='1 Presuntos Homicidios'; el dataset también trae suicidios/
@@ -349,7 +435,11 @@ addTask('medlegal_homicidio_amazonia_preliminar', async () => {
 
 // -------- Ejecución (secuencial, con pequeño delay para no saturar la API pública) --------
 async function main() {
-  console.log(`Descargando ${tasks.length} fuentes crudas desde datos.gov.co (Socrata)...`);
+  // CRIMENAI_ONLY=patron1,patron2 ejecuta solo las tareas cuyo nombre contiene alguno de los patrones
+  // (útil para regenerar una fuente sin volver a descargar las ~100).
+  const only = (process.env.CRIMENAI_ONLY || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (only.length) tasks.splice(0, tasks.length, ...tasks.filter(t => only.some(p => t.name.includes(p))));
+  console.log(`Descargando ${tasks.length} fuentes crudas para ${CURRENT_YEAR} desde datos.gov.co (Socrata)...`);
   for (const t of tasks) {
     try {
       const rows = await t.fn();
@@ -370,4 +460,6 @@ async function main() {
   // agregado final es razonable y aborta él mismo si no lo es.
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { soqlAll };
