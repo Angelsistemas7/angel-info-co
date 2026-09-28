@@ -626,6 +626,259 @@ departamentos.forEach(d => {
   d.tasaPor100k = tasaPor100k(d.total, poblacion);
 });
 
+// -------- Fuerza pública y drogas (OVERLAYS: magnitudes, NO suman al total) --------
+// Nueva familia de métricas (tarea co-fuerza-publica-impl; fuentes en
+// investigacion/co-fuerza-publica/INFORME.md): resultados operacionales del Ministerio de
+// Defensa (toda la Fuerza Pública: Ejército + Armada + FAC + Policía), armas incautadas
+// (DIJIN/Policía) y cultivos de coca ODC/SIMCI. Son MAGNITUDES (kg, ha, und, personas), no
+// delitos denunciados: van como overlays igual que capturas/minas_antipersonal (nunca se suman
+// al total del Índice) y cada métrica lleva unidad explícita + metadatos (fuente, datasetId,
+// nota). Ningún campo existente se toca: este bloque solo añade la llave `overlaysFuerzaPublica`.
+// Funciones puras (exportadas para data/test_fuerza_publica.js): reciben filas crudas SoQL y
+// devuelven estructuras listas, sin leer archivos.
+const FP_METRICAS = {
+  cocaina_kg:      { unidad: 'kg', fuente: 'Ministerio de Defensa Nacional — resultados operacionales (toda la Fuerza Pública)', datasetId: '26zg-9p9r', muniCodigo: true, totalOficial: true, nota: 'Clorhidrato de cocaína incautado (kg). Solo territorio colombiano: se excluyen las incautaciones en el exterior por cooperación internacional (~67% en 2025). El total oficial MinDefensa (con exterior) va en historicoNacionalTotal. Año vigente preliminar (registros tardíos).' },
+  marihuana_kg:    { unidad: 'kg', fuente: 'Ministerio de Defensa Nacional — resultados operacionales (toda la Fuerza Pública)', datasetId: 'g228-vp9d', muniCodigo: true, totalOficial: true, nota: 'Marihuana incautada (kg). Solo territorio colombiano (2025: 64,9 t en el exterior). El total oficial va en historicoNacionalTotal.' },
+  base_coca_kg:    { unidad: 'kg', fuente: 'Ministerio de Defensa Nacional — resultados operacionales (toda la Fuerza Pública)', datasetId: 'nxbk-nikm', muniCodigo: false, totalOficial: true, nota: 'Base de coca incautada (kg). Solo territorio colombiano. OJO: cod_muni viene roto en origen (trae el nombre del departamento), así que el municipio se cruza a DIVIPOLA por nombre; filas sin cruce quedan con divipola:null pero sí cuentan en el total.' },
+  laboratorios:    { unidad: 'und', fuente: 'Ministerio de Defensa Nacional — resultados operacionales (toda la Fuerza Pública)', datasetId: 's29y-2xjd', muniCodigo: true, nota: 'Infraestructura de producción de drogas destruida (unidades: laboratorios). Solo territorio colombiano.' },
+  erradicacion_ha: { unidad: 'ha', fuente: 'Ministerio de Defensa Nacional — resultados operacionales (toda la Fuerza Pública)', datasetId: 'p72f-qcvk', muniCodigo: true, nota: 'Erradicación (ha). Solo tipo_de_cultivo=COCA. Serie desde 2007.' },
+  fp_asesinados:   { unidad: 'personas', fuente: 'Ministerio de Defensa Nacional — afectación a la Fuerza Pública', datasetId: '8rpn-wpty', muniCodigo: true, nota: 'Miembros de la Fuerza Pública ASESINADOS en cumplimiento del deber (personas). Contraparte oficial de "neutralizados": son las bajas propias.' },
+  fp_heridos:      { unidad: 'personas', fuente: 'Ministerio de Defensa Nacional — afectación a la Fuerza Pública', datasetId: '8rpn-wpty', muniCodigo: true, nota: 'Miembros de la Fuerza Pública HERIDOS en cumplimiento del deber (personas).' },
+  sometidos:       { unidad: 'personas', fuente: 'Ministerio de Defensa Nacional — GAHD (sometimiento individual a la justicia)', datasetId: 'xg7g-dzk4', tipo: 'personas', nota: 'Personas sometidas individualmente a la justicia, por grupo (GAOR, Clan del Golfo…). 1 fila = 1 persona. Serie desde 2020.' },
+  desmovilizados:  { unidad: 'personas', fuente: 'Ministerio de Defensa Nacional — GAHD (desmovilización individual)', datasetId: '3pur-d5ez', tipo: 'personas', nota: 'Desmovilizados individuales (solo ELN en este dataset), por grupo. Serie desde 2002.' },
+  desvinculados:   { unidad: 'personas', fuente: 'Ministerio de Defensa Nacional — GAHD (desvinculación de menores)', datasetId: 'ajsa-ebuq', tipo: 'personas', nota: 'Menores de edad desvinculados de grupos armados, por grupo. Serie desde 2003.' },
+  armas_incautadas:{ unidad: 'und', fuente: 'DIJIN/Policía Nacional — reporte de incautación de armas de fuego (SOLO Policía, no FF.MM.)', datasetId: '2iz5-9bbz', muniCodigo: true, porClase: true, nota: 'Armas de fuego incautadas por la Policía (unidades). codigo_dane de 8 dígitos recortado a DIVIPOLA de 5. Serie 2010–2026.' },
+  cultivos_coca_ha:{ unidad: 'ha', fuente: 'ODC/MinJusticia con datos SIMCI-UNODC — detección de cultivos de coca', datasetId: 'acs4-3wgp', formatoAncho: true, nota: 'Hectáreas de coca al 31-dic por municipio (censo anual SIMCI). El año N se publica ~jun-jul del N+1: `anioActual` = último año disponible, no el año vigente.' },
+};
+
+function fpNum(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; }
+// Año vigente por departamento desde filas {departamento, total}.
+function fpActualPorDepto(rows) {
+  const out = {};
+  (rows || []).forEach(r => {
+    const key = normalizeDeptoName(r.departamento);
+    if (!byKey[key]) return;
+    out[key] = (out[key] || 0) + fpNum(r.total);
+  });
+  return out;
+}
+// Histórico anual nacional ordenado desde filas {anio, total}.
+function fpHistoricoNacional(rows) {
+  const byYear = {};
+  (rows || []).forEach(r => {
+    const a = String(r.anio);
+    byYear[a] = (byYear[a] || 0) + fpNum(r.total);
+  });
+  return Object.keys(byYear).sort().map(anio => ({ anio, total: byYear[anio] }));
+}
+// Histórico anual por departamento desde filas {departamento, anio, total}.
+function fpHistoricoDepartamental(rows) {
+  const out = {};
+  DEPARTAMENTOS.forEach(d => { out[d.key] = {}; });
+  (rows || []).forEach(r => {
+    const key = normalizeDeptoName(r.departamento);
+    if (!out[key]) return;
+    const a = String(r.anio);
+    out[key][a] = (out[key][a] || 0) + fpNum(r.total);
+  });
+  return out;
+}
+// DIVIPOLA de 5 dígitos desde un código crudo (5 u 8 dígitos; ej. armas '25754000' -> '25754').
+function fpDivipola(code) {
+  const digits = String(code === null || code === undefined ? '' : code).replace(/\D/g, '');
+  if (!digits) return null;
+  return digits.length <= 5 ? digits : digits.slice(0, 5);
+}
+function fpNombreMunicipio(raw) {
+  return String(raw === null || raw === undefined ? '' : raw).replace(/\s*\(CT\)\s*$/, '').trim();
+}
+// Municipios del año vigente: filas {municipio, departamento, total[, codigo_dane]}.
+// `resolver` = (deptoKey, nombre, codigoCrudo) -> divipola (o null). Por defecto usa el código.
+function fpActualPorMunicipio(rows, resolver) {
+  const res = resolver || ((dk, nombre, codigo) => fpDivipola(codigo));
+  const out = {};
+  (rows || []).forEach(r => {
+    const deptoKey = normalizeDeptoName(r.departamento);
+    if (!byKey[deptoKey]) return;
+    const nombre = fpNombreMunicipio(r.municipio);
+    if (!nombre) return;
+    const k = normalizeMuniKey(nombre) + '|' + deptoKey;
+    if (!out[deptoKey]) out[deptoKey] = {};
+    if (!out[deptoKey][k]) out[deptoKey][k] = { municipio: nombre, divipola: res(deptoKey, nombre, r.codigo_dane), total: 0 };
+    out[deptoKey][k].total += fpNum(r.total);
+    if (!out[deptoKey][k].divipola) out[deptoKey][k].divipola = res(deptoKey, nombre, r.codigo_dane);
+  });
+  const sorted = {};
+  Object.keys(out).forEach(dk => { sorted[dk] = Object.values(out[dk]).sort((a, b) => b.total - a.total); });
+  return sorted;
+}
+// Histórico municipal: filas {municipio, departamento, anio, total} -> {"MUNI|DEPTOKEY": {anio: total}}.
+function fpHistoricoMunicipal(rows) {
+  const out = {};
+  (rows || []).forEach(r => {
+    const deptoKey = normalizeDeptoName(r.departamento);
+    if (!byKey[deptoKey]) return;
+    const nombre = fpNombreMunicipio(r.municipio);
+    if (!nombre) return;
+    const k = normalizeMuniKey(nombre) + '|' + deptoKey;
+    const a = String(r.anio);
+    if (!out[k]) out[k] = {};
+    out[k][a] = (out[k][a] || 0) + fpNum(r.total);
+  });
+  return out;
+}
+// Series de personas por grupo: filas {departamento, anio, grupo, total}.
+function fpPersonasPorGrupo(rows) {
+  const out = {};
+  DEPARTAMENTOS.forEach(d => { out[d.key] = {}; });
+  (rows || []).forEach(r => {
+    const key = normalizeDeptoName(r.departamento);
+    if (!out[key]) return;
+    const a = String(r.anio);
+    const g = String(r.grupo === null || r.grupo === undefined ? 'SIN_DATO' : r.grupo).trim() || 'SIN_DATO';
+    out[key][a] = out[key][a] || {};
+    out[key][a][g] = (out[key][a][g] || 0) + fpNum(r.total);
+  });
+  return out;
+}
+// Año vigente para series de personas (filas depto x año x grupo): suma los grupos.
+function fpPersonasActualPorDepto(rows) {
+  const out = {};
+  (rows || []).forEach(r => {
+    if (String(r.anio) !== String(CURRENT_YEAR)) return;
+    const key = normalizeDeptoName(r.departamento);
+    if (!byKey[key]) return;
+    out[key] = (out[key] || 0) + fpNum(r.total);
+  });
+  return out;
+}
+// Pivota cultivos_coca_municipio (formato ancho: columnas _2001.._2024, texto salvo _2020)
+// a filas largas {municipio, divipola, departamento, anio, total}. Omite celdas vacías.
+function fpPivotCultivosCoca(rows) {
+  const out = [];
+  (rows || []).forEach(r => {
+    const deptoKey = normalizeDeptoName(r.departamento);
+    if (!byKey[deptoKey]) return;
+    const municipio = String(r.municipio === null || r.municipio === undefined ? '' : r.municipio).trim();
+    if (!municipio) return;
+    const divipola = fpDivipola(r.codmpio);
+    Object.keys(r).forEach(col => {
+      const m = /^_(\d{4})$/.exec(col);
+      if (!m) return;
+      const raw = r[col];
+      if (raw === null || raw === undefined || String(raw).trim() === '') return;
+      if (!Number.isFinite(parseFloat(raw))) return;
+      out.push({ municipio, divipola, departamento: deptoKey, anio: m[1], total: fpNum(raw) });
+    });
+  });
+  return out;
+}
+// Base de coca: el municipio se cruza a DIVIPOLA por nombre vía el catálogo DANE (buscarRegistroPoblacion).
+function fpResolverDivipolaPorNombre(deptoKey, nombre) {
+  const reg = buscarRegistroPoblacion(deptoKey, nombre);
+  return reg ? String(reg.divipola) : null;
+}
+// Magnitudes MinDefensa con archivos fp_<k> / hist_depto_fp_<k> / hist_nacional_fp_<k> /
+// municipios_fp_<k> / hist_municipio_fp_<k> (+ _total para el oficial con exterior).
+function fpBuildMagnitud(key, meta) {
+  const muniRows = tryLoad('municipios_fp_' + key + '.json');
+  const resolver = meta.muniCodigo ? null : fpResolverDivipolaPorNombre;
+  const bloque = {
+    unidad: meta.unidad, fuente: meta.fuente, datasetId: meta.datasetId, nota: meta.nota,
+    actualPorDepartamento: fpActualPorDepto(tryLoad('fp_' + key + '.json')),
+    historicoNacional: fpHistoricoNacional(tryLoad('hist_nacional_fp_' + key + '.json')),
+    historicoDepartamental: fpHistoricoDepartamental(tryLoad('hist_depto_fp_' + key + '.json')),
+    actualPorMunicipio: fpActualPorMunicipio(muniRows, resolver),
+    historicoMunicipal: fpHistoricoMunicipal(tryLoad('hist_municipio_fp_' + key + '.json')),
+  };
+  if (meta.totalOficial) {
+    bloque.historicoNacionalTotal = tryLoad('hist_nacional_fp_' + key + '_total.json')
+      .map(r => ({ anio: String(r.anio), total: fpNum(r.total), colombia: fpNum(r.colombia) }))
+      .sort((a, b) => a.anio.localeCompare(b.anio));
+  }
+  return bloque;
+}
+// Series de personas (sometidos/desmovilizados/desvinculados): el año vigente se deriva del
+// histórico por departamento (misma técnica que currentFromHistDepto para amenazas/lesiones).
+function fpBuildPersonas(key, meta) {
+  const depRows = tryLoad('hist_depto_fp_' + key + '.json');
+  return {
+    unidad: meta.unidad, fuente: meta.fuente, datasetId: meta.datasetId, nota: meta.nota,
+    actualPorDepartamento: fpPersonasActualPorDepto(depRows),
+    historicoNacional: fpHistoricoNacional(depRows),
+    historicoDepartamental: fpHistoricoDepartamental(depRows),
+    historicoDepartamentalPorGrupo: fpPersonasPorGrupo(depRows),
+    actualPorMunicipio: fpActualPorMunicipio(tryLoad('municipios_fp_' + key + '.json')),
+    historicoMunicipal: fpHistoricoMunicipal(tryLoad('hist_municipio_fp_' + key + '.json')),
+  };
+}
+function fpBuildArmas(meta) {
+  return {
+    unidad: meta.unidad, fuente: meta.fuente, datasetId: meta.datasetId, nota: meta.nota,
+    actualPorDepartamento: fpActualPorDepto(tryLoad('armas_incautadas.json')),
+    historicoNacional: fpHistoricoNacional(tryLoad('hist_nacional_armas_incautadas.json')),
+    historicoDepartamental: fpHistoricoDepartamental(tryLoad('hist_depto_armas_incautadas.json')),
+    actualPorMunicipio: fpActualPorMunicipio(tryLoad('municipios_armas_incautadas.json')),
+    historicoMunicipal: fpHistoricoMunicipal(tryLoad('hist_municipio_armas_incautadas.json')),
+    porClase: tryLoad('armas_incautadas_clase.json')
+      .map(r => ({ label: r.label, total: fpNum(r.total) }))
+      .filter(r => r.label)
+      .sort((a, b) => b.total - a.total),
+  };
+}
+function fpBuildCultivos(meta) {
+  const long = fpPivotCultivosCoca(tryLoad('cultivos_coca_municipio.json'));
+  const anios = [...new Set(long.map(r => r.anio))].sort();
+  const ultimo = anios.length ? anios[anios.length - 1] : null;
+  const actualPorDepartamento = {};
+  const historicoDepartamental = {};
+  DEPARTAMENTOS.forEach(d => { historicoDepartamental[d.key] = {}; });
+  const actualPorMunicipio = {};
+  const historicoMunicipal = {};
+  long.forEach(r => {
+    historicoDepartamental[r.departamento][r.anio] = (historicoDepartamental[r.departamento][r.anio] || 0) + r.total;
+    const k = normalizeMuniKey(r.municipio) + '|' + r.departamento;
+    if (!historicoMunicipal[k]) historicoMunicipal[k] = {};
+    historicoMunicipal[k][r.anio] = (historicoMunicipal[k][r.anio] || 0) + r.total;
+    if (ultimo !== null && r.anio === ultimo) {
+      actualPorDepartamento[r.departamento] = (actualPorDepartamento[r.departamento] || 0) + r.total;
+      if (!actualPorMunicipio[r.departamento]) actualPorMunicipio[r.departamento] = {};
+      if (!actualPorMunicipio[r.departamento][k]) actualPorMunicipio[r.departamento][k] = { municipio: r.municipio, divipola: r.divipola, total: 0 };
+      actualPorMunicipio[r.departamento][k].total += r.total;
+    }
+  });
+  Object.keys(actualPorMunicipio).forEach(dk => {
+    actualPorMunicipio[dk] = Object.values(actualPorMunicipio[dk]).sort((a, b) => b.total - a.total);
+  });
+  const porAnio = {};
+  long.forEach(r => { porAnio[r.anio] = (porAnio[r.anio] || 0) + r.total; });
+  return {
+    unidad: meta.unidad, fuente: meta.fuente, datasetId: meta.datasetId, nota: meta.nota,
+    anioActual: ultimo,
+    actualPorDepartamento,
+    historicoNacional: Object.keys(porAnio).sort().map(anio => ({ anio, total: porAnio[anio] })),
+    historicoDepartamental,
+    actualPorMunicipio,
+    historicoMunicipal,
+  };
+}
+
+const overlaysFuerzaPublica = {
+  cocaina_kg: fpBuildMagnitud('cocaina_kg', FP_METRICAS.cocaina_kg),
+  marihuana_kg: fpBuildMagnitud('marihuana_kg', FP_METRICAS.marihuana_kg),
+  base_coca_kg: fpBuildMagnitud('base_coca_kg', FP_METRICAS.base_coca_kg),
+  laboratorios: fpBuildMagnitud('laboratorios', FP_METRICAS.laboratorios),
+  erradicacion_ha: fpBuildMagnitud('erradicacion_ha', FP_METRICAS.erradicacion_ha),
+  fp_asesinados: fpBuildMagnitud('fp_asesinados', FP_METRICAS.fp_asesinados),
+  fp_heridos: fpBuildMagnitud('fp_heridos', FP_METRICAS.fp_heridos),
+  sometidos: fpBuildPersonas('sometidos', FP_METRICAS.sometidos),
+  desmovilizados: fpBuildPersonas('desmovilizados', FP_METRICAS.desmovilizados),
+  desvinculados: fpBuildPersonas('desvinculados', FP_METRICAS.desvinculados),
+  armas_incautadas: fpBuildArmas(FP_METRICAS.armas_incautadas),
+  cultivos_coca_ha: fpBuildCultivos(FP_METRICAS.cultivos_coca_ha),
+};
+console.log('Fuerza pública y drogas: ' + Object.keys(overlaysFuerzaPublica).length + ' métricas overlay (unidades: ' + [...new Set(Object.values(overlaysFuerzaPublica).map(m => m.unidad))].join(', ') + ').');
+
 // -------- Delitos informáticos (Fiscalía / SPOA) --------
 const delitosInformaticos = {
   porAnio: tryLoad('hist_nacional_informaticos.json').map(r => ({ anio: String(r.anio), total: parseFloat(r.total) || 0 })),
@@ -732,11 +985,25 @@ const output = {
   historicoMunicipalOverlay,
   analitica,
   noticias,
+  overlaysFuerzaPublica,
 };
 
-if (!totales.total || totales.total < 100000) {
-  console.error('ABORTADO: total sospechosamente bajo (' + totales.total + '). Probablemente faltan los JSON crudos de entrada (ver nota al inicio del archivo). No se sobrescribió colombia_crimen.json.');
-  process.exit(1);
+// Solo se escribe cuando merge.js se ejecuta directo (node data/merge.js). Cuando se requiere
+// desde pruebas (data/test_fuerza_publica.js), no se escribe ni se aborta: se exponen los
+// constructores puros via module.exports para validarlos con fixtures.
+if (require.main === module) {
+  if (!totales.total || totales.total < 100000) {
+    console.error('ABORTADO: total sospechosamente bajo (' + totales.total + '). Probablemente faltan los JSON crudos de entrada (ver nota al inicio del archivo). No se sobrescribió colombia_crimen.json.');
+    process.exit(1);
+  }
+  fs.writeFileSync(path + '/colombia_crimen.json', JSON.stringify(output));
+  console.log('OK. Departamentos:', departamentos.length, '| Total periodo actual:', totales.total, '| Rango histórico:', anioGlobalMin, '-', anioGlobalMax);
 }
-fs.writeFileSync(path + '/colombia_crimen.json', JSON.stringify(output));
-console.log('OK. Departamentos:', departamentos.length, '| Total periodo actual:', totales.total, '| Rango histórico:', anioGlobalMin, '-', anioGlobalMax);
+
+module.exports = {
+  normalizeDeptoName, normalizeMuniKey, FP_METRICAS, overlaysFuerzaPublica,
+  fpNum, fpDivipola, fpNombreMunicipio, fpActualPorDepto, fpHistoricoNacional,
+  fpHistoricoDepartamental, fpActualPorMunicipio, fpHistoricoMunicipal,
+  fpPersonasPorGrupo, fpPersonasActualPorDepto, fpPivotCultivosCoca,
+  fpResolverDivipolaPorNombre, fpBuildMagnitud, fpBuildPersonas, fpBuildArmas, fpBuildCultivos,
+};

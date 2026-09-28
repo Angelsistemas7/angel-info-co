@@ -50,7 +50,7 @@ jobs:
         working-directory: data
 
       - name: Pruebas del pipeline
-        run: node test_pipeline_config.js && node test_fetch_raw_pagination.js
+        run: node test_pipeline_config.js && node test_fetch_raw_pagination.js && node test_fuerza_publica.js
         working-directory: data
 
       - name: Validar salida (33 deptos, 1.123 municipios DANE, totales = histórico, municipios <= depto)

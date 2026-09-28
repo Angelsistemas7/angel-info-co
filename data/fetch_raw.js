@@ -433,6 +433,157 @@ addTask('medlegal_homicidio_amazonia_preliminar', async () => {
   return rows;
 });
 
+// 12) Resultados operacionales de la Fuerza Pública -- Ministerio de Defensa (Observatorio de DDHH y
+// Defensa Nacional, "Información estadística desagregada"), publicados en datos.gov.co con corte
+// mensual (último corte visto: 31-08-2026, publicado 16-09-2026; re-verificado en vivo 2026-09-28).
+// Fuente primaria: Comando General FF.MM. + Policía Nacional. Cubren Ejército + Armada + FAC +
+// Policía (a diferencia de kk69-w2jj, que es SOLO Policía). El total nacional por año cuadra al
+// 0,00% con el XLSX oficial "Indicadores de seguridad y resultados operacionales" (MinDefensa).
+// Ver investigacion/co-fuerza-publica/INFORME.md (§5, agregado 2025 por departamento).
+// OJO 1: cocaína/marihuana/base incluyen incautaciones EN EL EXTERIOR por cooperación internacional
+//   (filas con departamento = ECUADOR, PANAMA, ESPAÑA, AGUAS INTERNACIONALES...; cod_depto de 3+
+//   dígitos). En 2025 fueron el 67% de la cocaína (658,6 t de 984,5 t). Para el mapa/territorio se
+//   filtra length(cod_depto)=2; el total "oficial" MinDefensa se guarda aparte (hist_nacional_*_total).
+// OJO 2: `cantidad` es kg (drogas), ha (erradicación), unidades (laboratorios), personas (afectación).
+//   Es una MAGNITUD, se suma (no es count de filas). En 26zg-9p9r la columna `unidad` está rota
+//   (repite la cantidad); el kg viene de la descripción del dataset y del cuadre con el XLSX.
+// OJO 3: en nxbk-nikm (base de coca) `cod_muni` trae el NOMBRE del departamento en el 100% de filas
+//   (verificado en vivo 2026-09-28: cod_muni='ANTIOQUIA', municipio='ITAGUI') -> el municipio se
+//   agrupa por nombre (municipio + departamento), no por código DANE; merge.js lo cruza a DIVIPOLA.
+// NO usar k2wp-tdv7 (insumos líquidos): 2025 suma 22,87 M gal vs 2,25 M gal oficiales (+918%).
+// NO usar n997-hhiv (insumos sólidos): trae unidad GALON y parece copia de líquidos.
+const FP_COL = "length(cod_depto)=2"; // solo territorio colombiano
+const FP = {
+  cocaina_kg:       { id: '26zg-9p9r', muniKey: 'cod_muni', colombia: true },
+  marihuana_kg:     { id: 'g228-vp9d', muniKey: 'cod_muni', colombia: true },
+  base_coca_kg:     { id: 'nxbk-nikm', muniKey: 'municipio', colombia: true },
+  laboratorios:     { id: 's29y-2xjd', muniKey: 'cod_muni', colombia: true },
+  erradicacion_ha:  { id: 'p72f-qcvk', muniKey: 'cod_muni', colombia: true, extraWhere: "tipo_de_cultivo='COCA'" },
+  fp_asesinados:    { id: '8rpn-wpty', muniKey: 'cod_muni', colombia: true, extraWhere: "accion='ASESINADO'" },
+  fp_heridos:       { id: '8rpn-wpty', muniKey: 'cod_muni', colombia: true, extraWhere: "accion='HERIDO'" },
+};
+Object.values(FP).forEach(s => { s.dateType = 'iso'; s.dateField = 'fecha_hecho'; });
+function fpWhere(src, extra) {
+  return [src.colombia ? FP_COL : null, src.extraWhere || null, extra || null].filter(Boolean).join(' AND ') || undefined;
+}
+Object.entries(FP).forEach(([name, src]) => {
+  const muniSel = src.muniKey === 'cod_muni' ? 'cod_muni as codigo_dane, municipio, departamento' : 'municipio, departamento';
+  const muniGroup = src.muniKey === 'cod_muni' ? 'cod_muni, municipio, departamento' : 'municipio, departamento';
+  // Año vigente por departamento
+  addTask('fp_' + name, async () => soql(src.id, {
+    $select: 'departamento, sum(cantidad) as total',
+    $where: fpWhere(src, currentPeriodWhere(src)),
+    $group: 'departamento', $order: 'departamento', $limit: 100,
+  }));
+  // Histórico anual por departamento (2010-hoy; erradicación desde 2007)
+  addTask('hist_depto_fp_' + name, async () => soqlAll(src.id, {
+    $select: `departamento, ${yearExpr(src)} as anio, sum(cantidad) as total`,
+    $where: fpWhere(src),
+    $group: 'departamento, anio', $order: 'departamento, anio',
+  }));
+  // Histórico anual nacional (solo territorio colombiano)
+  addTask('hist_nacional_fp_' + name, async () => soql(src.id, {
+    $select: `${yearExpr(src)} as anio, sum(cantidad) as total`,
+    $where: fpWhere(src), $group: 'anio', $order: 'anio', $limit: 200,
+  }));
+  // Municipios, año vigente e histórico anual (paginado: municipio x año supera el $limit único)
+  addTask('municipios_fp_' + name, async () => soqlAll(src.id, {
+    $select: `${muniSel}, sum(cantidad) as total`,
+    $where: fpWhere(src, currentPeriodWhere(src)),
+    $group: muniGroup, $order: muniGroup,
+  }));
+  addTask('hist_municipio_fp_' + name, async () => soqlAll(src.id, {
+    $select: `${muniSel}, ${yearExpr(src)} as anio, sum(cantidad) as total`,
+    $where: fpWhere(src),
+    $group: `${muniGroup}, anio`, $order: `${muniGroup}, anio`,
+  }));
+});
+// Total "oficial" MinDefensa (incluye exterior/cooperación internacional), para la ficha nacional.
+// Si el mapa (territorio) y la cifra oficial no se muestran juntos, parecen contradictorios.
+['cocaina_kg', 'marihuana_kg', 'base_coca_kg'].forEach(name => {
+  const src = FP[name];
+  addTask('hist_nacional_fp_' + name + '_total', async () => soql(src.id, {
+    $select: `${yearExpr(src)} as anio, sum(cantidad) as total, sum(case(length(cod_depto)=2, cantidad, true, 0)) as colombia`,
+    $group: 'anio', $order: 'anio', $limit: 200,
+  }));
+});
+
+// 13) Sometidos / desmovilizados ELN / desvinculados menores (MinDefensa, GAHD). Campo de fecha
+// `fecha` (Calendar date -> dateType 'iso'). Sometidos (xg7g-dzk4) no trae `cantidad`
+// (1 fila = 1 persona -> count(*)); desmovilizados y desvinculados traen cantidad=1 por fila.
+// Los tres traen cod_muni DIVIPOLA de 5 dígitos + municipio + departamento + grupo
+// (verificado en vivo 2026-09-28).
+const FP_PERSONAS = {
+  sometidos:      { id: 'xg7g-dzk4', agg: 'count(*)' },
+  desmovilizados: { id: '3pur-d5ez', agg: 'sum(cantidad)' },
+  desvinculados:  { id: 'ajsa-ebuq', agg: 'sum(cantidad)' },
+};
+Object.values(FP_PERSONAS).forEach(s => { s.dateType = 'iso'; s.dateField = 'fecha'; });
+Object.entries(FP_PERSONAS).forEach(([name, s]) => {
+  addTask('hist_depto_fp_' + name, async () => soql(s.id, {
+    $select: `departamento, date_extract_y(fecha) as anio, grupo, ${s.agg} as total`,
+    $group: 'departamento, anio, grupo', $order: 'departamento, anio, grupo', $limit: 20000,
+  }));
+});
+// 13b) Las mismas 3 series a nivel municipal (año vigente + histórico anual paginado). Mismo
+// universo que 13 (sin filtro territorial: estas series no traen filas del exterior), para que
+// la validación "suma municipal <= departamental" compare cifras homogéneas.
+Object.entries(FP_PERSONAS).forEach(([name, s]) => {
+  addTask('municipios_fp_' + name, async () => soqlAll(s.id, {
+    $select: `cod_muni as codigo_dane, municipio, departamento, grupo, ${s.agg} as total`,
+    $where: currentPeriodWhere(s),
+    $group: 'codigo_dane, municipio, departamento, grupo',
+    $order: 'codigo_dane, municipio, departamento, grupo',
+  }));
+  addTask('hist_municipio_fp_' + name, async () => soqlAll(s.id, {
+    $select: `cod_muni as codigo_dane, municipio, departamento, date_extract_y(fecha) as anio, grupo, ${s.agg} as total`,
+    $group: 'codigo_dane, municipio, departamento, anio, grupo',
+    $order: 'codigo_dane, municipio, departamento, anio, grupo',
+  }));
+});
+
+// 14) Armas de fuego incautadas -- DIJIN/Policía Nacional, 2iz5-9bbz (SOLO Policía, no FF.MM.).
+// fecha_hecho texto DD/MM/AAAA (dateType 'text'); codigo_dane de 8 dígitos (5 DIVIPOLA + '000',
+// verificado en vivo 2026-09-28: '25754000' Soacha, '11001000' Bogotá) -> se recorta a 5 en
+// la consulta. municipio_hecho puede traer sufijo ' (CT)'. cantidad es texto -> ::number.
+// 2025: 21.827 armas vs 21.826 del Informe de Gestión 2025 de la Policía (+0,005%).
+const ARMAS = { id: '2iz5-9bbz', dateType: 'text', dateField: 'fecha_hecho' };
+addTask('armas_incautadas', async () => soql(ARMAS.id, {
+  $select: 'departamento, sum(cantidad::number) as total',
+  $where: currentPeriodWhere(ARMAS), $group: 'departamento', $limit: 100,
+}));
+addTask('hist_depto_armas_incautadas', async () => soql(ARMAS.id, {
+  $select: `departamento, ${yearExpr(ARMAS)} as anio, sum(cantidad::number) as total`,
+  $group: 'departamento, anio', $order: 'departamento, anio', $limit: 5000,
+}));
+addTask('hist_nacional_armas_incautadas', async () => soql(ARMAS.id, {
+  $select: `${yearExpr(ARMAS)} as anio, sum(cantidad::number) as total`,
+  $group: 'anio', $order: 'anio', $limit: 200,
+}));
+addTask('municipios_armas_incautadas', async () => soqlAll(ARMAS.id, {
+  $select: 'substring(codigo_dane,1,5) as codigo_dane, municipio_hecho as municipio, departamento, sum(cantidad::number) as total',
+  $where: currentPeriodWhere(ARMAS),
+  $group: 'codigo_dane, municipio, departamento', $order: 'codigo_dane, municipio, departamento',
+}));
+addTask('hist_municipio_armas_incautadas', async () => soqlAll(ARMAS.id, {
+  $select: `substring(codigo_dane,1,5) as codigo_dane, municipio_hecho as municipio, departamento, ${yearExpr(ARMAS)} as anio, sum(cantidad::number) as total`,
+  $group: 'codigo_dane, municipio, departamento, anio', $order: 'codigo_dane, municipio, departamento, anio',
+}));
+addTask('armas_incautadas_clase', async () => soql(ARMAS.id, {
+  $select: 'clase_bien as label, sum(cantidad::number) as total',
+  $where: currentPeriodWhere(ARMAS), $group: 'clase_bien', $order: 'total DESC', $limit: 50,
+}));
+
+// 15) Cultivos de coca (ha) por municipio -- ODC/MinJusticia con datos SIMCI-UNODC, acs4-3wgp
+// (verificado en vivo 2026-09-28: 2001-2024, formato ancho). Una fila por municipio (319) y una
+// columna por año (_2001.._2024, texto salvo _2020 number). Censo anual al 31-dic; el año N se
+// publica ~jun-jul del año N+1 (2024 publicado en 2025; dataset actualizado 2026-07-08 y aún sin
+// 2025). merge.js lo pivota a filas largas (ancho -> largo).
+// 2024: 261.386 ha (UNODC/SIMCI publicó "261.000 ha"); Tumaco 31.300,41 ha; Tibú 25.911,23 ha.
+addTask('cultivos_coca_municipio', async () => soqlAll('acs4-3wgp', {
+  $order: 'codmpio',
+}, { pageSize: 1000 }));
+
 // -------- Ejecución (secuencial, con pequeño delay para no saturar la API pública) --------
 async function main() {
   // CRIMENAI_ONLY=patron1,patron2 ejecuta solo las tareas cuyo nombre contiene alguno de los patrones

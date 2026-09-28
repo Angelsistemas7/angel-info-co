@@ -54,6 +54,56 @@ for (const [category, rowsByMunicipality] of Object.entries(data.historicoMunici
   check(Object.keys(rowsByMunicipality).length > 0, `${category}: histórico municipal vacío`);
 }
 
+// Fuerza pública y drogas (overlaysFuerzaPublica): conciliación municipal/departamental/nacional.
+// - Suma municipal (año vigente) <= total departamental, por departamento y métrica.
+// - Histórico nacional (cada año) = suma de departamentos ese año (tolerancia float: kg con decimales).
+// - Cada métrica trae metadatos completos (fuente, datasetId, unidad, nota).
+// Los overlays nunca entran en `totales` ni en `categorias` (no suman al Índice).
+check(data.overlaysFuerzaPublica && typeof data.overlaysFuerzaPublica === 'object',
+  'falta overlaysFuerzaPublica (familia Fuerza pública y drogas)');
+const FP_EPS_REL = 1e-6;
+function fpCerca(a, b) {
+  return Math.abs(a - b) <= FP_EPS_REL * Math.max(1, Math.abs(a), Math.abs(b));
+}
+const FP_METRICAS_ESPERADAS = ['cocaina_kg', 'marihuana_kg', 'base_coca_kg', 'laboratorios',
+  'erradicacion_ha', 'fp_asesinados', 'fp_heridos', 'sometidos', 'desmovilizados',
+  'desvinculados', 'armas_incautadas', 'cultivos_coca_ha'];
+FP_METRICAS_ESPERADAS.forEach(m => {
+  const b = (data.overlaysFuerzaPublica || {})[m];
+  check(b && typeof b === 'object', `overlaysFuerzaPublica.${m}: falta el bloque`);
+  if (!b) return;
+  check(typeof b.unidad === 'string' && b.unidad.length > 0, `overlaysFuerzaPublica.${m}: falta unidad explícita`);
+  check(typeof b.fuente === 'string' && b.fuente.length > 0, `overlaysFuerzaPublica.${m}: falta fuente`);
+  check(typeof b.datasetId === 'string' && b.datasetId.length > 0, `overlaysFuerzaPublica.${m}: falta datasetId`);
+  check(typeof b.nota === 'string' && b.nota.length > 0, `overlaysFuerzaPublica.${m}: falta nota`);
+  check(!b.unidad || ['kg', 'ha', 'und', 'personas'].includes(b.unidad),
+    `overlaysFuerzaPublica.${m}: unidad inesperada ${b.unidad}`);
+  const dep = b.actualPorDepartamento || {};
+  Object.entries(b.actualPorMunicipio || {}).forEach(([dk, munis]) => {
+    const suma = munis.reduce((s, x) => s + (Number(x.total) || 0), 0);
+    const techo = Number(dep[dk]) || 0;
+    check(suma <= techo + FP_EPS_REL * Math.max(1, Math.abs(techo)),
+      `${m} ${dk}: municipios=${suma} > departamento=${dep[dk]}`);
+    munis.forEach(x => {
+      check(x.municipio, `${m} ${dk}: fila municipal sin nombre`);
+    });
+  });
+  const histDep = b.historicoDepartamental || {};
+  (b.historicoNacional || []).forEach(({ anio, total }) => {
+    const suma = Object.values(histDep).reduce((st, porAnio) => st + (Number(porAnio[anio]) || 0), 0);
+    if (suma !== 0 || Number(total) !== 0) {
+      // En las series de personas MinDefensa hay registros aislados sin departamento (desvinculados:
+      // 1 persona en 2009 y en 2018): cuentan en el nacional pero no en ningún depto. Se tolera que el
+      // nacional supere a la suma por <=0,5 % (mín. 1); nunca que la suma supere al nacional.
+      const nac = Number(total);
+      const sinDepto = nac - suma;
+      check(fpCerca(suma, nac) || (sinDepto > 0 && sinDepto <= Math.max(1, 0.005 * nac)),
+        `${m} ${anio}: nacional=${total}, suma deptos=${suma}`);
+    }
+  });
+});
+check(!(data.totales && FP_METRICAS_ESPERADAS.some(m => data.totales[m] !== undefined)),
+  'un overlay de fuerza pública suma al total nacional (debe ser overlay, no categoría)');
 if (failures.length) {
   console.error('VALIDACIÓN FALLIDA:');
   failures.forEach(message => console.error(' - ' + message));
