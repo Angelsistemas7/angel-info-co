@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = __dirname;
 const { CURRENT_YEAR } = require('./pipeline_config');
+const { reconcileAnmHistorical } = require('./reconcile_co_historical');
 
 function load(name) {
   return JSON.parse(fs.readFileSync(path + '/' + name, 'utf8'));
@@ -587,6 +588,15 @@ poblacionMunicipios.forEach(r => {
 });
 
 // 3) Tasas, estado de cobertura y orden.
+// Conciliar series históricas de corregimientos DANE (ANM) que SIEDCO nombra
+// sin sufijo, solo cuando la ficha territorial es inequívoca.
+const seriesAnmConciliadas = reconcileAnmHistorical(
+  municipiosDetalle,
+  { ...historicoMunicipal, ...historicoMunicipalOverlay },
+  normalizeMuniKey,
+);
+console.log('Histórico municipal: ' + seriesAnmConciliadas + ' series (ANM) conciliadas con DANE.');
+
 let municipiosConPoblacion = 0;
 let municipiosSinPoblacion = 0;
 Object.values(municipiosDetalle).forEach(munis => {

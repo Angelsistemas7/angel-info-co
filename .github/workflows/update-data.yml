@@ -50,7 +50,7 @@ jobs:
         working-directory: data
 
       - name: Pruebas del pipeline
-        run: node test_pipeline_config.js && node test_fetch_raw_pagination.js && node test_fetch_raw_failure.js && node test_fuerza_publica.js && node test_validate_output_reconciliation.js
+        run: node test_pipeline_config.js && node test_fetch_raw_pagination.js && node test_fetch_raw_failure.js && node test_fuerza_publica.js && node test_validate_output_reconciliation.js && node test_reconcile_co_historical.js
         working-directory: data
 
       - name: Validar salida (33 deptos, 1.123 municipios DANE y conciliación municipal)
