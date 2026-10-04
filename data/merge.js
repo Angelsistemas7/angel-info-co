@@ -90,7 +90,7 @@ const CATS_OVERLAY = ['feminicidios', 'minas_antipersonal', 'capturas'];
 const ALL_CATS = CATS.concat(CATS_OVERLAY);
 ALL_CATS.forEach(c => { DEPARTAMENTOS.forEach(d => { byKey[d.key][c] = 0; }); });
 
-// "hurto" es un compuesto de 4 fuentes reales de Policía Nacional (personas, residencias, vehículos, otros)
+// "hurto" es un compuesto de 5 fuentes reales de Policía Nacional (personas, residencias, vehículos, otros, comercio)
 const HURTO_SUBFUENTES = {
   personas: 'hurto_personas',
   residencias: 'hurto_residencias',
@@ -269,12 +269,12 @@ const analitica = {
 
 // -------- Municipios completos, los 33 departamentos (enriquecimiento) --------
 // Fuentes nacionales agregadas por municipio (ver fetch_raw.js, sección 7): homicidio, extorsión y
-// hurto (compuesto de sus 4 subfuentes de Policía Nacional, igual que HURTO_SUBFUENTES arriba),
+// hurto (compuesto de sus 5 subfuentes de Policía Nacional, igual que HURTO_SUBFUENTES arriba),
 // periodo actual 2025-2026. Antes esto solo se calculaba para Antioquia y Valle; ahora cubre las
 // 33 llaves de DEPARTAMENTOS para que la Vista Táctica pueda colorear los ~1.122 municipios reales.
 // Llave canónica de municipio: sin acentos y en mayúsculas, para que el mismo municipio cruce
 // entre fuentes que no siempre acentúan igual (ej. "Medellín" en una fuente, "MEDELLIN" en otra) —
-// sin esto, el mismo municipio podía duplicarse o no cruzar entre las 4 sub-fuentes de hurto, o
+// sin esto, el mismo municipio podía duplicarse o no cruzar entre las 5 subfuentes de hurto, o
 // entre el periodo actual y el histórico (ver historicoMunicipal más abajo).
 function normalizeMuniKey(name) {
   return stripAccents(String(name)).toUpperCase().replace(/\s+/g, ' ').trim();
@@ -967,7 +967,7 @@ const output = {
     rangoAnios,
     coberturaMunicipal,
     generado: new Date().toISOString(),
-    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 4 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre). Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
+    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 5 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre y comercio). Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
   },
   categorias: CATS,
   categoriasOverlay: CATS_OVERLAY,

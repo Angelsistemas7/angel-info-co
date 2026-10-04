@@ -36,14 +36,17 @@ for (const category of data.categorias || []) {
   }
 }
 
-// Conciliación municipio <-> departamento por categoría municipal: la suma municipal no puede superar el
-// total departamental salvo el relleno forense de Medicina Legal (homicidios en la Amazonía).
+// Conciliación municipio <-> departamento por categoría municipal. La única diferencia
+// observada en el corte actual es un caso de lesiones en Nariño. Las filas forenses de
+// Medicina Legal se excluyen: no forman parte del total SIEDCO departamental.
 for (const category of Object.keys(data.historicoMunicipal || {})) {
   for (const department of data.departamentos) {
     const munis = (data.municipiosDetalle || {})[department.key] || [];
     const siedco = munis.filter(m => !m.fuenteHomicidios).reduce((sum, m) => sum + (Number(m[category]) || 0), 0);
-    check(siedco <= (Number(department[category]) || 0),
-      `${category} ${department.key}: municipios=${siedco} > departamento=${department[category]}`);
+    const maxResidue = category === 'lesiones' && department.key === 'NARINO' ? 1 : 0;
+    const residue = (Number(department[category]) || 0) - siedco;
+    check(residue >= 0 && residue <= maxResidue,
+      `${category} ${department.key}: municipios=${siedco}, departamento=${department[category]}, residuo máximo=${maxResidue}`);
   }
 }
 

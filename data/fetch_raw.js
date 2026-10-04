@@ -5,8 +5,8 @@
 //
 // Uso:  node data/fetch_raw.js
 // Salida: escribe ~50 archivos *.json en data/ (mismo formato/nombre que espera merge.js).
-// Si una fuente falla (red, dataset caído, cambio de esquema), se loguea un warning y se sigue
-// con las demás — nunca se aborta el proceso completo por una sola fuente.
+// Si una fuente falla (red, dataset caído, cambio de esquema), se registran los errores,
+// se completan las demás descargas y la corrida termina con error para no publicar datos parciales.
 
 const fs = require('fs');
 const path = __dirname;
@@ -267,10 +267,10 @@ async function breakdown(src, field, outKey) {
   return rows;
 }
 
-// 7) Municipios completos, TODOS los 33 departamentos (homicidio, extorsion, hurto=4 subfuentes),
+// 7) Municipios completos, TODOS los 33 departamentos (homicidio, extorsion, hurto=5 subfuentes),
 // año vigente. Alimenta municipiosDetalle en merge.js (~1.122 municipios).
-// hurto se compone de las mismas 4 subfuentes que HURTO_SUBFUENTES en merge.js (personas,
-// residencias, vehículos, abigeato+financiero+pirateria) para ser consistente con el total
+// hurto se compone de las mismas 5 subfuentes que HURTO_SUBFUENTES en merge.js (personas,
+// residencias, vehículos, abigeato+financiero+piratería y comercio) para ser consistente con el total
 // nacional de "hurto" del resto del dashboard.
 const MUNI_NACIONAL_FILES = {
   municipios_homicidio: SRC.homicidio,
@@ -604,13 +604,14 @@ async function main() {
   }
   console.log('\nResumen: ' + okCount + ' OK, ' + failCount + ' fallidas de ' + tasks.length + ' fuentes.');
   if (failures.length) {
-    console.log('Fuentes fallidas (se usarán datos vacíos/parciales para esos archivos en merge.js):');
+    console.log('Fuentes fallidas (se conserva la publicación anterior):');
     failures.forEach(f => console.log('  - ' + f));
   }
-  // No exit(1) aquí: un fallo parcial no debe tumbar el workflow; merge.js decide si el total
-  // agregado final es razonable y aborta él mismo si no lo es.
+  // Una fuente ausente puede dejar totales plausibles pero incompletos. Conservamos la
+  // publicación anterior hasta que todas las descargas terminen correctamente.
+  if (failCount) process.exitCode = 1;
 }
 
 if (require.main === module) main();
 
-module.exports = { soqlAll };
+module.exports = { soqlAll, main };

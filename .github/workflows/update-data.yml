@@ -50,15 +50,19 @@ jobs:
         working-directory: data
 
       - name: Pruebas del pipeline
-        run: node test_pipeline_config.js && node test_fetch_raw_pagination.js && node test_fuerza_publica.js
+        run: node test_pipeline_config.js && node test_fetch_raw_pagination.js && node test_fetch_raw_failure.js && node test_fuerza_publica.js && node test_validate_output_reconciliation.js
         working-directory: data
 
-      - name: Validar salida (33 deptos, 1.123 municipios DANE, totales = histórico, municipios <= depto)
+      - name: Validar salida (33 deptos, 1.123 municipios DANE y conciliación municipal)
         run: node validate_output.js
         working-directory: data
 
       - name: Aplicar parche Fiscalía (SPOA) + Medicina Legal (SIRDEC)
         run: node patch_fiscalia_ubpd.js
+        working-directory: data
+
+      - name: Validar salida final
+        run: node validate_output.js ../dist/data/colombia_crimen.json
         working-directory: data
 
       - name: Detectar cambios reales (ignora meta.generado, que cambia siempre)
