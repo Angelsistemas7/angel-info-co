@@ -81,7 +81,8 @@ const CATS = ['homicidios', 'secuestros', 'extorsion', 'amenazas', 'delitos_sexu
 // es una naturaleza de dato distinta a "delito" y sumarla distorsionaría el Índice de Seguridad
 // (mismo criterio que dejar desaparecidosUBPD fuera de CATS). Se muestra igual en el mapa/leyenda/
 // histórico vía el mecanismo genérico de categorías overlay.
-const CATS_OVERLAY = ['feminicidios', 'minas_antipersonal', 'capturas'];
+const CATS_OVERLAY = ['feminicidios', 'minas_antipersonal', 'capturas', 'trata_personas', 'delitos_ambientales',
+  'invasion_tierras', 'voladura_oleoductos', 'voladura_puentes_vias'];
 // 'capturas' (personas detenidas por la Policía Nacional, DIJIN 3jdh-nmwu) tampoco se suma al
 // total nacional, por la misma razón que minas_antipersonal: no es un delito denunciado sino
 // actividad operativa policial (mismo criterio que las aprehensiones de Costa Rica). Una captura
@@ -115,6 +116,11 @@ const FILES = {
   feminicidios: 'feminicidio',
   minas_antipersonal: 'minas_antipersonal',
   capturas: 'capturas',
+  trata_personas: 'trata_personas',
+  delitos_ambientales: 'delitos_ambientales',
+  invasion_tierras: 'invasion_tierras',
+  voladura_oleoductos: 'voladura_oleoductos',
+  voladura_puentes_vias: 'voladura_puentes_vias',
 };
 
 // -------- Current period (año vigente) department totals --------
@@ -155,6 +161,8 @@ currentFromHistDepto('amenazas', 'amenazas');
 currentFromHistDepto('lesiones', 'lesiones');
 currentFromHistDepto('terrorismo', 'terrorismo');
 currentFromHistDepto('minas_antipersonal', 'minas_antipersonal');
+['trata_personas', 'delitos_ambientales', 'invasion_tierras', 'voladura_oleoductos', 'voladura_puentes_vias']
+  .forEach(c => currentFromHistDepto(c, c));
 
 const departamentos = Object.values(byKey).map(d => {
   const total = CATS.reduce((s, c) => s + d[c], 0);
@@ -336,7 +344,10 @@ const MUNI_CATS = {
   terrorismo: ['terrorismo'],
   estupefacientes: ['estupefacientes'],
 };
-const MUNI_OVERLAYS = { feminicidios: ['feminicidio'], capturas: ['capturas'] };
+const MUNI_OVERLAYS = {
+  feminicidios: ['feminicidio'], capturas: ['capturas'],
+  delitos_ambientales: ['delitos_ambientales'], invasion_tierras: ['invasion_tierras'],
+};
 const MUNI_FIELDS = Object.keys(MUNI_CATS);
 const MUNI_ALL_FIELDS = [...MUNI_FIELDS, ...Object.keys(MUNI_OVERLAYS)];
 function muniVacio(municipio) {

@@ -46,6 +46,14 @@ assert.equal(SRC.lesiones.extraWhere, undefined);
 // con `ids` pediría «undefined.json» y fallaría).
 for (const m of fetchSrc.matchAll(/(?:soql|soqlAll)\(SRC\.(\w+)\.id/g)) assert.ok(!SRC[m[1]].ids, `${m[1]} se consulta con su único id`);
 
+// Series aparte del Ministerio (overlay, no suman al total): mismo esquema, trata solo arts. 188 A y B.
+for (const [cat, id] of [['trata_personas', '95c7-mm6s'], ['delitos_ambientales', '9zck-qfvc'], ['invasion_tierras', 'kvjj-d2ay'], ['voladura_oleoductos', 'ec2r-4byk'], ['voladura_puentes_vias', 'm98b-cdys']]) {
+  assert.equal(SRC[cat].id, id, `${cat} usa el conjunto del Ministerio`);
+  assert.equal(SRC[cat].dateType, 'iso');
+}
+assert.match(SRC.trata_personas.extraWhere, /^\(.*188 A.*188 B.*\)$/, 'trata: 188 A y B entre paréntesis (se une al filtro de año)');
+assert.doesNotMatch(SRC.trata_personas.extraWhere, /MIGRANTES/);
+
 // Filas de varios conjuntos: se suman las que comparten todas las columnas salvo el total.
 assert.deepEqual(sumarFilas([
   { departamento: 'META', anio: '2005', total: '2' }, { departamento: 'META', anio: '2005', total: '3' },

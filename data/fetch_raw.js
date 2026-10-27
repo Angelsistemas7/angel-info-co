@@ -185,6 +185,19 @@ const SRC = {
   // grupo_etario. NO es un delito denunciado (naturaleza distinta, igual que aprehensiones de
   // Costa Rica): en merge.js va como categoría overlay, no suma al total nacional.
   capturas: { id: '3jdh-nmwu', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // Series aparte del Ministerio de Defensa (overlay: no suman al total), medidas el 27-oct-2026
+  // (CrimenAi: docs/auditorias/2026-10-27/series_mindefensa.md). Mismo esquema: fecha ISO, depto, municipio, cantidad.
+  // Trata: solo arts. 188 A y 188 B; el 188 (tráfico de migrantes) va en el mismo conjunto y cae de 306
+  // en 2023 a 1 en 2025 (ruptura de registro, no baja real). 2025: 261.
+  trata_personas: { id: '95c7-mm6s', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "(descripcion_conducta like 'ARTICULO 188 A%' OR descripcion_conducta like 'ARTICULO 188 B%')" },
+  // Título XI del Código Penal (arts. 328–339). 2025: 2.510 en 530 municipios.
+  delitos_ambientales: { id: '9zck-qfvc', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // Usurpación (art. 261) e invasión (art. 263); se multiplica por 4 en 2016 al entrar el 263. 2025: 837.
+  invasion_tierras: { id: 'kvjj-d2ay', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // Desde 2007; 1 fila = 1 hecho, casi todo en Arauca. 2025: 31.
+  voladura_oleoductos: { id: 'ec2r-4byk', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // Vías públicas (92 %) y puentes. 2025: 25.
+  voladura_puentes_vias: { id: 'm98b-cdys', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
 };
 
 // -------- Tareas: cada una produce un archivo data/<nombre>.json --------
@@ -232,6 +245,8 @@ const HIST_SOURCES = {
   estupefacientes: SRC.estupefacientes, feminicidio: SRC.feminicidio,
   minas_antipersonal: SRC.minas_antipersonal,
   capturas: SRC.capturas,
+  trata_personas: SRC.trata_personas, delitos_ambientales: SRC.delitos_ambientales, invasion_tierras: SRC.invasion_tierras,
+  voladura_oleoductos: SRC.voladura_oleoductos, voladura_puentes_vias: SRC.voladura_puentes_vias,
 };
 Object.entries(HIST_SOURCES).forEach(([file, src]) => {
   addTask('hist_depto_' + file, async () => {
@@ -382,6 +397,9 @@ const MUNI_EXTRA_FILES = {
   municipios_estupefacientes: SRC.estupefacientes,
   municipios_feminicidio: SRC.feminicidio,
   municipios_capturas: SRC.capturas,
+  // Solo las dos con cobertura municipal amplia (oleoductos y puentes caen en 6 y 11 municipios).
+  municipios_delitos_ambientales: SRC.delitos_ambientales,
+  municipios_invasion_tierras: SRC.invasion_tierras,
 };
 Object.entries(MUNI_EXTRA_FILES).forEach(([file, src]) => {
   addTask(file, async () => soqlAll(src.id, {
