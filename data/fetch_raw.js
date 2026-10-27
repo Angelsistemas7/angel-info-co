@@ -113,15 +113,28 @@ const SRC = {
   // el dataset DIPON 6sqw-8cg5 las separa como tipo_de_hurto distintos (ver investigacion/co-fuentes-extra).
   hurto_comercio: { id: '7i2x-h5vp', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   hurto_extra: { id: 'd4fr-sbn2', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' }, // abigeato+financiero+pirateria
-  sexuales: { id: 'fpe5-yrmw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', delito: 'delito', genero: 'genero', grupo_etario: 'grupo_etario' },
-  violencia_intrafamiliar: { id: 'vuyt-mqpw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', genero: 'genero', grupo_etario: 'grupo_etario' },
+  // Delitos sexuales y violencia intrafamiliar: cifra del Ministerio de Defensa (bz43-8ahq, gepp-dxcs).
+  // Son los mismos registros que los reportes DIJIN de la Policía (fpe5-yrmw, vuyt-mqpw): idénticos de
+  // 2010 a 2025 salvo 1 caso en 2022 (DS) y 2 en 2025 (VIF), y el desglose por sexo de DS coincide
+  // exacto; pero el Ministerio empieza en 2003 y actualiza cada mes (corte 30-sep-2026 frente a 31-jul
+  // de la Policía: 25.084 frente a 18.970 DS en 2026). Cambio del 27-oct-2026.
+  sexuales: { id: 'bz43-8ahq', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  violencia_intrafamiliar: { id: 'gepp-dxcs', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // El tipo de delito sexual, el grupo etario y el sexo en VIF solo los publica la Policía: esos
+  // desgloses siguen saliendo de sus reportes y llevan su propio corte (meses_* más abajo).
+  sexuales_policia: { id: 'fpe5-yrmw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  vif_policia: { id: 'vuyt-mqpw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   amenazas: { id: 'meew-mguv', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   // Lesiones: el reporte DIPON mezcla las lesiones personales con las lesiones culposas en accidente
   // de tránsito (art. 120, ~48 mil al año). El Ministerio de Defensa publica estas aparte («Lesiones
   // accidentes de tránsito»); sin ellas la serie cuadra con su «Lesiones personales» año por año
   // (CrimenAi: data/audit_co_mindefensa.js, 27-oct-2026). No son violencia: no entran en la categoría.
   lesiones: { id: '72sg-cybi', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "descripci_n_conducta not like '%ACCIDENTE DE TRANSITO%'" },
-  terrorismo: { id: '37p5-impc', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // Terrorismo: cifra oficial del Ministerio de Defensa (yi5j-5fe9, «se mide en casos», art. 343, desde
+  // 2003). El reporte DIJIN de la Policía (37p5-impc) solo trae las denuncias validadas con la Fiscalía
+  // desde 2010 (234 en 2025 frente a 1.398 casos): coinciden de 2010 a 2015 y se separan desde 2016. La
+  // prensa cita la del Ministerio (742 en 2022, 1.398 en 2025; NTN24). Cambio del 27-oct-2026.
+  terrorismo: { id: 'yi5j-5fe9', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   estupefacientes: { id: 'kk69-w2jj', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', clase_bien: 'clase_bien', aggType: 'count' },
   feminicidio: { id: 'm8fd-ahd9', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "spoa_caracterizacion='FEMINICIDIO'" },
   // Víctimas de minas antipersonal/MUSE/AEI -- Centro Nacional de Memoria Histórica (CNMH), Sistema
@@ -247,11 +260,19 @@ Object.entries(TOP_MUNI_FILES).forEach(([file, src]) => {
 addTask('homicidio_arma', () => breakdown(SRC.homicidio, 'arma_medio', 'label'));
 addTask('homicidio_sexo', () => breakdown(SRC.homicidio, 'sexo', 'label'));
 addTask('homicidio_modalidad', () => breakdown(SRC.homicidio, '_modalidad_presunta', 'label'));
-addTask('sexuales_delito', () => breakdown(SRC.sexuales, 'delito', 'label'));
-addTask('sexuales_genero', () => breakdown(SRC.sexuales, 'genero', 'label'));
-addTask('sexuales_grupo_etario', () => breakdown(SRC.sexuales, 'grupo_etario', 'label'));
-addTask('vif_genero', () => breakdown(SRC.violencia_intrafamiliar, 'genero', 'label'));
-addTask('vif_grupo_etario', () => breakdown(SRC.violencia_intrafamiliar, 'grupo_etario', 'label'));
+addTask('sexuales_delito', () => breakdown(SRC.sexuales_policia, 'delito', 'label'));
+addTask('sexuales_genero', () => breakdown(SRC.sexuales, 'sexo', 'label'));
+addTask('sexuales_grupo_etario', () => breakdown(SRC.sexuales_policia, 'grupo_etario', 'label'));
+addTask('vif_genero', () => breakdown(SRC.vif_policia, 'genero', 'label'));
+addTask('vif_grupo_etario', () => breakdown(SRC.vif_policia, 'grupo_etario', 'label'));
+// Meses del año vigente que traen los reportes de la Policía usados solo para desgloses: la app
+// rotula esos desgloses con su tramo («enero–julio») porque el total sale del Ministerio.
+const mesesDelAnio = src => soql(src.id, {
+  $select: 'substring(fecha_hecho,4,2) as mes, sum(cantidad::number) as total',
+  $where: currentPeriodWhere(src), $group: 'mes', $order: 'mes', $limit: 20,
+});
+addTask('meses_sexuales_policia', () => mesesDelAnio(SRC.sexuales_policia));
+addTask('meses_vif_policia', () => mesesDelAnio(SRC.vif_policia));
 addTask('secuestro_tipo', () => breakdown(SRC.secuestro, 'tipo_delito', 'label'));
 addTask('estupefacientes_tipo', () => breakdown(SRC.estupefacientes, 'clase_bien', 'label'));
 addTask('minas_condicion', () => breakdown(SRC.minas_antipersonal, SRC.minas_antipersonal.condicion, 'label'));
@@ -588,6 +609,84 @@ addTask('cultivos_coca_municipio', async () => soqlAll('acs4-3wgp', {
   $order: 'codmpio',
 }, { pageSize: 1000 }));
 
+// 16) Hurto de vehículos y «otros hurtos» antes de 2010 (Ministerio de Defensa). Los reportes de la
+// Policía para motos/autos (9vha-vh9n) y abigeato+entidades financieras+piratería (d4fr-sbn2) empiezan
+// en 2010; el Ministerio publica los mismos registros desde 2003 en csb4-y6v2 (vehículos), p88b-5ac7
+// (abigeato), i7h7-wmjc (entidades financieras) y sutf-7dyz (piratería terrestre), con la misma
+// convención de nombres que hurto a personas/residencias/comercio. Verificado el 27-oct-2026: en 2010
+// coinciden exactamente, también por departamento (21.456 vehículos; 1.373 + 69 + 416 = 1.858). Sin
+// esto el hurto nacional 2003–2009 quedaba ~22 mil/año por debajo de la cifra oficial y la tendencia
+// daba un salto falso en 2010. Solo se completan los años anteriores a 2010 que la Policía no trae;
+// si en 2010 las dos fuentes dejan de coincidir (±1 %), la tarea falla y se conserva la publicación.
+const HURTO_ANTES_2010 = {
+  hurto: ['csb4-y6v2'],
+  hurto_extra: ['p88b-5ac7', 'i7h7-wmjc', 'sutf-7dyz'],
+};
+const ANIO_SOLAPE = 2010;
+const COMPLEMENTO_HURTO = {
+  hist_nacional_hurto: ['hurto', []],
+  hist_depto_hurto: ['hurto', ['departamento']],
+  hist_municipio_hurto_vehiculos: ['hurto', ['municipio', 'departamento']],
+  hist_nacional_hurto_extra: ['hurto_extra', []],
+  hist_depto_hurto_extra: ['hurto_extra', ['departamento']],
+  hist_municipio_hurto_extra: ['hurto_extra', ['municipio', 'departamento']],
+};
+
+// Puras (probadas sin red en test_co_fuentes_mindefensa.js).
+function sumarPorClave(filas, campos) {
+  const acc = new Map();
+  for (const r of filas) {
+    const k = [...campos.map(c => r[c]), String(r.anio)].join('\u0000');
+    const prev = acc.get(k);
+    if (prev) prev.total += Number(r.total) || 0;
+    else acc.set(k, { ...Object.fromEntries(campos.map(c => [c, r[c]])), anio: String(r.anio), total: Number(r.total) || 0 });
+  }
+  return [...acc.values()].map(r => ({ ...r, total: String(r.total) }));
+}
+function totalDelAnio(filas, anio) {
+  return filas.filter(r => Number(r.anio) === anio).reduce((s, r) => s + (Number(r.total) || 0), 0);
+}
+function verificarSolape(policia, ministerio, anio = ANIO_SOLAPE) {
+  const a = totalDelAnio(policia, anio), b = totalDelAnio(ministerio, anio);
+  if (!a || !b || Math.abs(a - b) / Math.max(a, b) > 0.01) {
+    throw new Error(`hurto antes de ${anio}: Policía (${a}) y Ministerio (${b}) ya no coinciden en ${anio}; revisar antes de completar`);
+  }
+}
+function completarAntesDe(policia, ministerio, campos, anio = ANIO_SOLAPE) {
+  const presentes = new Set(policia.map(r => String(r.anio)));
+  const extra = sumarPorClave(ministerio.filter(r => Number(r.anio) < anio && !presentes.has(String(r.anio))), campos);
+  return [...policia, ...extra];
+}
+
+async function filasMinDefensa(ids, campos, where) {
+  const filas = [];
+  for (const id of ids) {
+    const grupo = [...campos, 'anio'].join(', ');
+    filas.push(...await soqlAll(id, {
+      $select: [...campos, 'date_extract_y(fecha_hecho) as anio', 'sum(cantidad::number) as total'].join(', '),
+      $where: where,
+      $group: grupo,
+      $order: grupo,
+    }));
+  }
+  return filas;
+}
+
+tasks.forEach(t => {
+  const conf = COMPLEMENTO_HURTO[t.name];
+  if (!conf) return;
+  const [fuente, campos] = conf;
+  const original = t.fn;
+  t.fn = async () => {
+    const policia = await original();
+    const ids = HURTO_ANTES_2010[fuente];
+    const solape = await filasMinDefensa(ids, [], `date_extract_y(fecha_hecho)=${ANIO_SOLAPE}`);
+    verificarSolape(policia, solape);
+    const previos = await filasMinDefensa(ids, campos, `fecha_hecho < '${ANIO_SOLAPE}-01-01T00:00:00'`);
+    return completarAntesDe(policia, previos, campos);
+  };
+});
+
 // -------- Ejecución (secuencial, con pequeño delay para no saturar la API pública) --------
 async function main() {
   // CRIMENAI_ONLY=patron1,patron2 ejecuta solo las tareas cuyo nombre contiene alguno de los patrones
@@ -617,4 +716,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { soqlAll };
+module.exports = { soqlAll, SRC, HURTO_ANTES_2010, COMPLEMENTO_HURTO, sumarPorClave, verificarSolape, completarAntesDe };

@@ -94,8 +94,8 @@ ALL_CATS.forEach(c => { DEPARTAMENTOS.forEach(d => { byKey[d.key][c] = 0; }); })
 const HURTO_SUBFUENTES = {
   personas: 'hurto_personas',
   residencias: 'hurto_residencias',
-  vehiculos: 'hurto',       // 9vha-vh9n: motocicletas + automotores
-  otros: 'hurto_extra',     // d4fr-sbn2: abigeato + entidades financieras + piratería terrestre
+  vehiculos: 'hurto',       // 9vha-vh9n: motocicletas + automotores (2003–2009: csb4-y6v2 del Ministerio, ver fetch_raw §16)
+  otros: 'hurto_extra',     // d4fr-sbn2: abigeato + entidades financieras + piratería terrestre (2003–2009: Ministerio)
   comercio: 'hurto_comercio', // 7i2x-h5vp: hurto a comercio (antes no entraba en ninguna subfuente)
 };
 
@@ -242,6 +242,21 @@ function breakdown(file) {
     .map(r => ({ label: r.label, total: parseFloat(r.total) || 0 }))
     .filter(r => r.label);
 }
+// Desgloses que salen de los reportes de la Policía mientras el total de su categoría sale del
+// Ministerio de Defensa (más reciente): la app los rotula con el tramo que cubren («enero–julio 2026»).
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function tramoPolicia(file) {
+  const meses = tryLoad(file + '.json').map(r => Number(r.mes)).filter(m => m >= 1 && m <= 12).sort((a, b) => a - b);
+  if (!meses.length) return null;
+  const desde = MESES_ES[meses[0] - 1], hasta = MESES_ES[meses[meses.length - 1] - 1];
+  return 'Policía Nacional, ' + (desde === hasta ? desde : desde + '–' + hasta) + ' ' + CURRENT_YEAR;
+}
+const tramoDS = tramoPolicia('meses_sexuales_policia');
+const tramoVIF = tramoPolicia('meses_vif_policia');
+const analiticaCortes = Object.fromEntries([
+  ['sexuales_delito', tramoDS], ['sexuales_grupo_etario', tramoDS],
+  ['vif_genero', tramoVIF], ['vif_grupo_etario', tramoVIF],
+].filter(([, v]) => v));
 const analitica = {
   homicidios_arma: breakdown('homicidio_arma'),
   homicidios_sexo: breakdown('homicidio_sexo'),
@@ -967,7 +982,7 @@ const output = {
     rangoAnios,
     coberturaMunicipal,
     generado: new Date().toISOString(),
-    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 4 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre). Lesiones personales excluye las lesiones culposas en accidente de tránsito (art. 120 del Código Penal), que el reporte de la Policía mezclaba y el Ministerio de Defensa publica aparte. Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
+    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 5 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre y comercio); de 2003 a 2009 vehículos, abigeato, entidades financieras y piratería vienen de los mismos registros publicados por el Ministerio de Defensa, porque los reportes de la Policía empiezan en 2010 (en 2010 ambas fuentes coinciden exactamente). Lesiones personales excluye las lesiones culposas en accidente de tránsito (art. 120 del Código Penal), que el reporte de la Policía mezclaba y el Ministerio de Defensa publica aparte. Terrorismo = casos registrados por el Ministerio de Defensa (cifra oficial, desde 2003); el reporte de la Policía solo trae las denuncias validadas con la Fiscalía, muchas menos desde 2016. Delitos sexuales y violencia intrafamiliar = Ministerio de Defensa (mismos registros que la Policía, desde 2003 y con corte más reciente); el tipo de delito, la edad y el sexo en violencia intrafamiliar solo los publica la Policía y llevan su propio tramo. Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
   },
   categorias: CATS,
   categoriasOverlay: CATS_OVERLAY,
@@ -984,6 +999,7 @@ const output = {
   historicoMunicipal,
   historicoMunicipalOverlay,
   analitica,
+  analiticaCortes,
   noticias,
   overlaysFuerzaPublica,
 };
