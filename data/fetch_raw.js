@@ -618,18 +618,25 @@ addTask('cultivos_coca_municipio', async () => soqlAll('acs4-3wgp', {
 // esto el hurto nacional 2003–2009 quedaba ~22 mil/año por debajo de la cifra oficial y la tendencia
 // daba un salto falso en 2010. Solo se completan los años anteriores a 2010 que la Policía no trae;
 // si en 2010 las dos fuentes dejan de coincidir (±1 %), la tarea falla y se conserva la publicación.
-const HURTO_ANTES_2010 = {
+// Lesiones personales (72sg-cybi, sin las de tránsito) también empieza en 2010; el Ministerio publica
+// la misma serie desde 2003 en jr6v-i33g, que ya excluye las de tránsito. Verificado el 27-oct-2026:
+// 2010, 2011 y 2012 coinciden exacto en el total (53.141, 62.186, 82.183) y en los 33 departamentos.
+const ANTES_2010 = {
   hurto: ['csb4-y6v2'],
   hurto_extra: ['p88b-5ac7', 'i7h7-wmjc', 'sutf-7dyz'],
+  lesiones: ['jr6v-i33g'],
 };
 const ANIO_SOLAPE = 2010;
-const COMPLEMENTO_HURTO = {
+const COMPLEMENTO_ANTES_2010 = {
   hist_nacional_hurto: ['hurto', []],
   hist_depto_hurto: ['hurto', ['departamento']],
   hist_municipio_hurto_vehiculos: ['hurto', ['municipio', 'departamento']],
   hist_nacional_hurto_extra: ['hurto_extra', []],
   hist_depto_hurto_extra: ['hurto_extra', ['departamento']],
   hist_municipio_hurto_extra: ['hurto_extra', ['municipio', 'departamento']],
+  hist_nacional_lesiones: ['lesiones', []],
+  hist_depto_lesiones: ['lesiones', ['departamento']],
+  hist_municipio_lesiones: ['lesiones', ['municipio', 'departamento']],
 };
 
 // Puras (probadas sin red en test_co_fuentes_mindefensa.js).
@@ -646,10 +653,10 @@ function sumarPorClave(filas, campos) {
 function totalDelAnio(filas, anio) {
   return filas.filter(r => Number(r.anio) === anio).reduce((s, r) => s + (Number(r.total) || 0), 0);
 }
-function verificarSolape(policia, ministerio, anio = ANIO_SOLAPE) {
+function verificarSolape(policia, ministerio, anio = ANIO_SOLAPE, fuente = 'serie') {
   const a = totalDelAnio(policia, anio), b = totalDelAnio(ministerio, anio);
   if (!a || !b || Math.abs(a - b) / Math.max(a, b) > 0.01) {
-    throw new Error(`hurto antes de ${anio}: Policía (${a}) y Ministerio (${b}) ya no coinciden en ${anio}; revisar antes de completar`);
+    throw new Error(`${fuente} antes de ${anio}: Policía (${a}) y Ministerio (${b}) ya no coinciden en ${anio}; revisar antes de completar`);
   }
 }
 function completarAntesDe(policia, ministerio, campos, anio = ANIO_SOLAPE) {
@@ -673,15 +680,15 @@ async function filasMinDefensa(ids, campos, where) {
 }
 
 tasks.forEach(t => {
-  const conf = COMPLEMENTO_HURTO[t.name];
+  const conf = COMPLEMENTO_ANTES_2010[t.name];
   if (!conf) return;
   const [fuente, campos] = conf;
   const original = t.fn;
   t.fn = async () => {
     const policia = await original();
-    const ids = HURTO_ANTES_2010[fuente];
+    const ids = ANTES_2010[fuente];
     const solape = await filasMinDefensa(ids, [], `date_extract_y(fecha_hecho)=${ANIO_SOLAPE}`);
-    verificarSolape(policia, solape);
+    verificarSolape(policia, solape, ANIO_SOLAPE, fuente);
     const previos = await filasMinDefensa(ids, campos, `fecha_hecho < '${ANIO_SOLAPE}-01-01T00:00:00'`);
     return completarAntesDe(policia, previos, campos);
   };
@@ -716,4 +723,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { soqlAll, SRC, HURTO_ANTES_2010, COMPLEMENTO_HURTO, sumarPorClave, verificarSolape, completarAntesDe };
+module.exports = { soqlAll, SRC, ANTES_2010, COMPLEMENTO_ANTES_2010, sumarPorClave, verificarSolape, completarAntesDe };
