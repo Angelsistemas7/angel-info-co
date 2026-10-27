@@ -25,7 +25,7 @@ concurrency:
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45   # datos.gov.co a veces tarda: el 27-oct una corrida tardó 28 min y otra llegó a 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
