@@ -125,11 +125,13 @@ const SRC = {
   sexuales_policia: { id: 'fpe5-yrmw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   vif_policia: { id: 'vuyt-mqpw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   amenazas: { id: 'meew-mguv', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
-  // Lesiones: el reporte DIPON mezcla las lesiones personales con las lesiones culposas en accidente
-  // de tránsito (art. 120, ~48 mil al año). El Ministerio de Defensa publica estas aparte («Lesiones
-  // accidentes de tránsito»); sin ellas la serie cuadra con su «Lesiones personales» año por año
-  // (data/audit_co_mindefensa.js, 27-oct-2026). No son violencia: no entran en la categoría.
-  lesiones: { id: '72sg-cybi', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "descripci_n_conducta not like '%ACCIDENTE DE TRANSITO%'" },
+  // Lesiones personales: cifra del Ministerio de Defensa (jr6v-i33g), que ya excluye las lesiones
+  // culposas en accidente de tránsito (art. 120, ~48 mil al año; las publica aparte en ntej-qq7v: no
+  // son violencia). Son los mismos registros que el reporte DIPON de la Policía (72sg-cybi) sin
+  // tránsito: idénticos de 2010 a 2025 salvo 1 caso en 2020, 2023 y 2024, también por departamento;
+  // pero el Ministerio empieza en 2003 y su corte es más reciente (30-sep-2026 frente a 31-jul:
+  // 73.564 frente a 55.704 en 2026). Cambio del 27-oct-2026, como delitos sexuales y VIF.
+  lesiones: { id: 'jr6v-i33g', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   // Terrorismo: cifra oficial del Ministerio de Defensa (yi5j-5fe9, «se mide en casos», art. 343, desde
   // 2003). El reporte DIJIN de la Policía (37p5-impc) solo trae las denuncias validadas con la Fiscalía
   // desde 2010 (234 en 2025 frente a 1.398 casos): coinciden de 2010 a 2015 y se separan desde 2016. La
@@ -618,13 +620,10 @@ addTask('cultivos_coca_municipio', async () => soqlAll('acs4-3wgp', {
 // esto el hurto nacional 2003–2009 quedaba ~22 mil/año por debajo de la cifra oficial y la tendencia
 // daba un salto falso en 2010. Solo se completan los años anteriores a 2010 que la Policía no trae;
 // si en 2010 las dos fuentes dejan de coincidir (±1 %), la tarea falla y se conserva la publicación.
-// Lesiones personales (72sg-cybi, sin las de tránsito) también empieza en 2010; el Ministerio publica
-// la misma serie desde 2003 en jr6v-i33g, que ya excluye las de tránsito. Verificado el 27-oct-2026:
-// 2010, 2011 y 2012 coinciden exacto en el total (53.141, 62.186, 82.183) y en los 33 departamentos.
+// (Lesiones ya no necesita empalme: sale entera del Ministerio, ver SRC.lesiones.)
 const ANTES_2010 = {
   hurto: ['csb4-y6v2'],
   hurto_extra: ['p88b-5ac7', 'i7h7-wmjc', 'sutf-7dyz'],
-  lesiones: ['jr6v-i33g'],
 };
 const ANIO_SOLAPE = 2010;
 const COMPLEMENTO_ANTES_2010 = {
@@ -634,9 +633,6 @@ const COMPLEMENTO_ANTES_2010 = {
   hist_nacional_hurto_extra: ['hurto_extra', []],
   hist_depto_hurto_extra: ['hurto_extra', ['departamento']],
   hist_municipio_hurto_extra: ['hurto_extra', ['municipio', 'departamento']],
-  hist_nacional_lesiones: ['lesiones', []],
-  hist_depto_lesiones: ['lesiones', ['departamento']],
-  hist_municipio_lesiones: ['lesiones', ['municipio', 'departamento']],
 };
 
 // Puras (probadas sin red en test_co_fuentes_mindefensa.js).
