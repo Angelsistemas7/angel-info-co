@@ -1,14 +1,14 @@
 // Colombia con las cifras del Ministerio de Defensa, sin red (27-oct-2026):
-// - terrorismo, delitos sexuales, violencia intrafamiliar y lesiones leen los conjuntos del Ministerio;
+// - terrorismo, delitos sexuales, violencia intrafamiliar, lesiones y hurto leen los conjuntos del Ministerio;
 // - los desgloses que solo publica la Policía siguen saliendo de ella, con su tramo;
-// - hurto 2003–2009 se completa solo en los años que la Policía no trae, y frena si en 2010 no coinciden.
+// - hurto entero (vehículos y «otros» incluidos) lee los conjuntos del Ministerio, sumando los de «otros».
 // Uso: node data/test_co_fuentes_mindefensa.js
 'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { SRC, ANTES_2010, COMPLEMENTO_ANTES_2010, sumarPorClave, verificarSolape, completarAntesDe } = require('./fetch_raw');
+const { SRC, sumarFilas, deVarios } = require('./fetch_raw');
 
 // Cifra oficial del Ministerio (fecha ISO, desde 2003).
 for (const [cat, id] of [['terrorismo', 'yi5j-5fe9'], ['sexuales', 'bz43-8ahq'], ['violencia_intrafamiliar', 'gepp-dxcs'], ['lesiones', 'jr6v-i33g']]) {
@@ -30,59 +30,42 @@ if (fs.existsSync(appPath)) {
   assert.match(app, /\$\{escapeHtml\(corte\)\}/, 'el tramo se escapa');
 }
 
-// Vehículos en un conjunto; abigeato, entidades financieras y piratería en tres (= d4fr-sbn2 de la Policía).
-assert.deepEqual(ANTES_2010.hurto, ['csb4-y6v2']);
-assert.deepEqual(ANTES_2010.hurto_extra, ['p88b-5ac7', 'i7h7-wmjc', 'sutf-7dyz']);
-// Lesiones del Ministerio ya viene sin las de tránsito (las publica aparte): sin filtro ni empalme.
+// Hurto de vehículos en un conjunto; abigeato, entidades financieras y piratería en tres (= d4fr-sbn2
+// de la Policía). Sin empalme: todo el hurto sale del Ministerio, desde 2003 y con su corte.
+assert.equal(SRC.hurto.id, 'csb4-y6v2');
+assert.equal(SRC.hurto.dateType, 'iso');
+assert.deepEqual(SRC.hurto_extra.ids, ['p88b-5ac7', 'i7h7-wmjc', 'sutf-7dyz']);
+assert.equal(SRC.hurto_extra.id, undefined, 'otros hurtos no tiene un único conjunto');
+assert.equal(SRC.hurto_extra.dateType, 'iso');
+for (const cat of ['hurto_personas', 'hurto_residencias', 'hurto_comercio']) assert.equal(SRC[cat].dateType, 'iso', `${cat} del Ministerio`);
+assert.doesNotMatch(JSON.stringify(SRC), /9vha-vh9n|d4fr-sbn2/, 'ya no se lee hurto de la Policía');
+assert.doesNotMatch(fetchSrc, /ANTES_2010|completarAntesDe/, 'ni se empalma 2003–2009');
+// Lesiones del Ministerio ya viene sin las de tránsito (las publica aparte): sin filtro.
 assert.equal(SRC.lesiones.extraWhere, undefined);
-assert.equal(ANTES_2010.lesiones, undefined);
-// Los tres niveles de las dos subfuentes que empiezan en 2010, y ninguna otra.
-assert.deepEqual(Object.keys(COMPLEMENTO_ANTES_2010).sort(), [
-  'hist_depto_hurto', 'hist_depto_hurto_extra', 'hist_municipio_hurto_extra',
-  'hist_municipio_hurto_vehiculos', 'hist_nacional_hurto', 'hist_nacional_hurto_extra',
-]);
-for (const [tarea, [fuente, campos]] of Object.entries(COMPLEMENTO_ANTES_2010)) {
-  assert.ok(ANTES_2010[fuente], `${tarea}: fuente ${fuente} con conjuntos del Ministerio`);
-  const nivel = tarea.split('_')[1];
-  assert.deepEqual(campos, { nacional: [], depto: ['departamento'], municipio: ['municipio', 'departamento'] }[nivel], `${tarea}: campos de su nivel`);
-}
+// Toda tarea que lea una fuente de varios conjuntos pasa por consultar/consultarTodas (soql(src.id)
+// con `ids` pediría «undefined.json» y fallaría).
+for (const m of fetchSrc.matchAll(/(?:soql|soqlAll)\(SRC\.(\w+)\.id/g)) assert.ok(!SRC[m[1]].ids, `${m[1]} se consulta con su único id`);
 
-// Nacional: la Policía empieza en 2010; el Ministerio trae 2008–2010 repartido en dos conjuntos.
-const policia = [{ anio: '2010', total: '1858' }, { anio: '2011', total: '1884' }];
-const ministerio = [
-  { anio: '2008', total: '1953' }, { anio: '2008', total: '769' },
-  { anio: '2009', total: '1811' }, { anio: '2009', total: '655' },
-  { anio: '2010', total: '1442' }, { anio: '2010', total: '416' },
-];
-verificarSolape(policia, ministerio); // 1.858 = 1.442 + 416
-const nacional = completarAntesDe(policia, ministerio, []);
-assert.deepEqual(nacional, [
-  { anio: '2010', total: '1858' }, { anio: '2011', total: '1884' },
-  { anio: '2008', total: '2722' }, { anio: '2009', total: '2466' },
-], '2008 y 2009 se suman por año; 2010 no se duplica');
-
-// Un año que la Policía ya trae no se toca, aunque sea anterior a 2010.
-const conPrevio = completarAntesDe([{ anio: '2009', total: '5' }, ...policia], ministerio, []);
-assert.equal(conPrevio.filter(r => r.anio === '2009').length, 1);
-assert.equal(conPrevio.find(r => r.anio === '2009').total, '5');
-
-// Municipal: la clave incluye municipio y departamento.
-const muni = completarAntesDe([], [
+// Filas de varios conjuntos: se suman las que comparten todas las columnas salvo el total.
+assert.deepEqual(sumarFilas([
+  { departamento: 'META', anio: '2005', total: '2' }, { departamento: 'META', anio: '2005', total: '3' },
+  { departamento: 'META', anio: '2006', total: '1' }, { anio: '2005', departamento: 'META', total: '4' },
+]), [{ departamento: 'META', anio: '2005', total: '9' }, { departamento: 'META', anio: '2006', total: '1' }]);
+assert.deepEqual(sumarFilas([
   { municipio: 'MEDELLIN', departamento: 'ANTIOQUIA', anio: '2005', total: '3' },
-  { municipio: 'MEDELLIN', departamento: 'ANTIOQUIA', anio: '2005', total: '4' },
   { municipio: 'BELLO', departamento: 'ANTIOQUIA', anio: '2005', total: '1' },
-], ['municipio', 'departamento']);
-assert.deepEqual(muni, [
+  { municipio: 'MEDELLIN', departamento: 'ANTIOQUIA', anio: '2005', total: '4' },
+]), [
   { municipio: 'MEDELLIN', departamento: 'ANTIOQUIA', anio: '2005', total: '7' },
   { municipio: 'BELLO', departamento: 'ANTIOQUIA', anio: '2005', total: '1' },
-]);
-assert.deepEqual(sumarPorClave([{ departamento: 'META', anio: 2004, total: '2' }], ['departamento']),
-  [{ departamento: 'META', anio: '2004', total: '2' }]);
+], 'la clave municipal incluye municipio y departamento');
 
-// Si en 2010 dejan de coincidir (> 1 %) o falta el año de solape, no se mezcla nada.
-assert.throws(() => verificarSolape(policia, [{ anio: '2010', total: '1700' }]), /ya no coinciden/);
-assert.throws(() => verificarSolape(policia, [{ anio: '2010', total: '1700' }], 2010, 'hurto_extra'), /^Error: hurto_extra antes de 2010/);
-assert.throws(() => verificarSolape(policia, [{ anio: '2009', total: '1858' }]), /ya no coinciden/);
-verificarSolape(policia, [{ anio: '2010', total: '1859' }]); // ±1 se admite
-
-console.log('test_co_fuentes_mindefensa: OK');
+// deVarios: un id va directo; varios se piden con los mismos parámetros y se suman (2010: 1.373 + 69 + 416).
+(async () => {
+  const pedidos = [];
+  const pedir = async (id, params) => { pedidos.push([id, params.$group]); return { 'p88b-5ac7': [{ anio: '2010', total: '1373' }], 'i7h7-wmjc': [{ anio: '2010', total: '69' }], 'sutf-7dyz': [{ anio: '2010', total: '416' }], 'csb4-y6v2': [{ anio: '2010', total: '21456' }] }[id]; };
+  assert.deepEqual(await deVarios(SRC.hurto_extra, { $group: 'anio' }, pedir), [{ anio: '2010', total: '1858' }]);
+  assert.deepEqual(await deVarios(SRC.hurto, { $group: 'anio' }, pedir), [{ anio: '2010', total: '21456' }]);
+  assert.deepEqual(pedidos, [['p88b-5ac7', 'anio'], ['i7h7-wmjc', 'anio'], ['sutf-7dyz', 'anio'], ['csb4-y6v2', 'anio']]);
+  console.log('test_co_fuentes_mindefensa: OK');
+})().catch(e => { console.error(e); process.exit(1); });

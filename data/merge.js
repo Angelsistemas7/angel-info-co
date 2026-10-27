@@ -91,12 +91,13 @@ const CATS_OVERLAY = ['feminicidios', 'minas_antipersonal', 'capturas'];
 const ALL_CATS = CATS.concat(CATS_OVERLAY);
 ALL_CATS.forEach(c => { DEPARTAMENTOS.forEach(d => { byKey[d.key][c] = 0; }); });
 
-// "hurto" es un compuesto de 5 fuentes reales de Policía Nacional (personas, residencias, vehículos, otros, comercio)
+// "hurto" es un compuesto de 5 fuentes del Ministerio de Defensa (personas, residencias, vehículos, otros, comercio),
+// los mismos registros que la Policía Nacional, desde 2003 y con su corte mensual (fetch_raw.js, SRC.hurto)
 const HURTO_SUBFUENTES = {
   personas: 'hurto_personas',
   residencias: 'hurto_residencias',
-  vehiculos: 'hurto',       // 9vha-vh9n: motocicletas + automotores (2003–2009: csb4-y6v2 del Ministerio, ver fetch_raw §16)
-  otros: 'hurto_extra',     // d4fr-sbn2: abigeato + entidades financieras + piratería terrestre (2003–2009: Ministerio)
+  vehiculos: 'hurto',       // csb4-y6v2: motocicletas + automotores
+  otros: 'hurto_extra',     // p88b-5ac7 + i7h7-wmjc + sutf-7dyz: abigeato + entidades financieras + piratería terrestre
   comercio: 'hurto_comercio', // 7i2x-h5vp: hurto a comercio (antes no entraba en ninguna subfuente)
 };
 

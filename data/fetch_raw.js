@@ -25,6 +25,7 @@ function save(name, data) {
 }
 
 async function soql(datasetId, params, attempt = 1) {
+  if (!datasetId) throw new Error('consulta sin conjunto: una fuente con `ids` se pide con consultar()/consultarTodas()');
   const cleanParams = {};
   Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null) cleanParams[k] = v; });
   const qs = new URLSearchParams(cleanParams).toString();
@@ -100,6 +101,30 @@ function aggExpr(src) {
   return src.aggType === 'count' ? 'count(*)' : `sum(${src.cant}::number)`;
 }
 
+// Una fuente puede ser la suma de varios conjuntos con el mismo esquema (`ids`, p. ej. «otros
+// hurtos» = abigeato + entidades financieras + piratería terrestre del Ministerio). Se consulta cada
+// uno con los mismos parámetros y se suman las filas que comparten todas las columnas salvo `total`.
+// Pura (probada sin red en test_co_fuentes_mindefensa.js).
+function sumarFilas(filas) {
+  const acc = new Map();
+  for (const r of filas) {
+    const { total, ...clave } = r;
+    const k = JSON.stringify(Object.entries(clave).sort(([a], [b]) => (a < b ? -1 : 1)));
+    const prev = acc.get(k);
+    if (prev) prev.total += Number(total) || 0;
+    else acc.set(k, { ...r, total: Number(total) || 0 });
+  }
+  return [...acc.values()].map(r => ({ ...r, total: String(r.total) }));
+}
+async function deVarios(src, params, pedir) {
+  if (!src.ids) return pedir(src.id, params);
+  const filas = [];
+  for (const id of src.ids) filas.push(...await pedir(id, params));
+  return sumarFilas(filas);
+}
+const consultar = (src, params) => deVarios(src, params, soql);
+const consultarTodas = (src, params) => deVarios(src, params, soqlAll);
+
 // -------- Definición de las 10 fuentes SIEDCO (Policía Nacional) --------
 const SRC = {
   homicidio: { id: 'm8fd-ahd9', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
@@ -107,12 +132,18 @@ const SRC = {
   extorsion: { id: 'q2ib-t9am', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   hurto_personas: { id: '4rxi-8m8d', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   hurto_residencias: { id: '7mn7-vzqp', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
-  hurto: { id: '9vha-vh9n', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' }, // motos/autos
+  // Hurto de vehículos (motocicletas + automotores) y «otros hurtos» (abigeato + entidades financieras +
+  // piratería terrestre): cifra del Ministerio de Defensa (csb4-y6v2; p88b-5ac7 + i7h7-wmjc + sutf-7dyz).
+  // Son los mismos registros que los reportes de la Policía (9vha-vh9n, d4fr-sbn2): verificado el
+  // 27-oct-2026, 2010–2025 idénticos salvo ±1 caso en 2011, 2013, 2016 y 2019 y 9 en 2024; pero el
+  // Ministerio empieza en 2003 (la Policía en 2010) y su corte es más reciente (30-sep-2026 frente a
+  // 31-jul: 31.802 frente a 24.602 vehículos en 2026). Sustituye el empalme 2003–2009 del 27-oct.
+  hurto: { id: 'csb4-y6v2', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   // Hurto a comercio (MinDefensa, copia de SIEDCO con fecha ISO y código DANE): única modalidad de hurto
   // que no entraba en ninguna subfuente (26.331 hechos en 2025). Sin doble conteo con personas/residencias:
   // el dataset DIPON 6sqw-8cg5 las separa como tipo_de_hurto distintos (ver investigacion/co-fuentes-extra).
   hurto_comercio: { id: '7i2x-h5vp', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
-  hurto_extra: { id: 'd4fr-sbn2', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' }, // abigeato+financiero+pirateria
+  hurto_extra: { ids: ['p88b-5ac7', 'i7h7-wmjc', 'sutf-7dyz'], dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   // Delitos sexuales y violencia intrafamiliar: cifra del Ministerio de Defensa (bz43-8ahq, gepp-dxcs).
   // Son los mismos registros que los reportes DIJIN de la Policía (fpe5-yrmw, vuyt-mqpw): idénticos de
   // 2010 a 2025 salvo 1 caso en 2022 (DS) y 2 en 2025 (VIF), y el desglose por sexo de DS coincide
@@ -182,7 +213,7 @@ const CURRENT_FILES = {
 Object.entries(CURRENT_FILES).forEach(([file, src]) => {
   addTask(file, async () => {
     const where = currentPeriodWhere(src, src.extraWhere);
-    const rows = await soql(src.id, {
+    const rows = await consultar(src, {
       $select: `${src.depto} as departamento, ${aggExpr(src)} as total`,
       $where: where,
       $group: src.depto,
@@ -204,7 +235,7 @@ const HIST_SOURCES = {
 };
 Object.entries(HIST_SOURCES).forEach(([file, src]) => {
   addTask('hist_depto_' + file, async () => {
-    const rows = await soql(src.id, {
+    const rows = await consultar(src, {
       $select: `${src.depto} as departamento, ${yearExpr(src)} as anio, ${aggExpr(src)} as total`,
       $where: src.extraWhere || undefined,
       $group: `${src.depto}, anio`,
@@ -214,7 +245,7 @@ Object.entries(HIST_SOURCES).forEach(([file, src]) => {
   });
   // 3) Histórico anual nacional (hist_nacional_<file>.json)
   addTask('hist_nacional_' + file, async () => {
-    const rows = await soql(src.id, {
+    const rows = await consultar(src, {
       $select: `${yearExpr(src)} as anio, ${aggExpr(src)} as total`,
       $where: src.extraWhere || undefined,
       $group: 'anio',
@@ -310,7 +341,7 @@ const MUNI_NACIONAL_FILES = {
 };
 Object.entries(MUNI_NACIONAL_FILES).forEach(([file, src]) => {
   addTask(file, async () => {
-    const rows = await soql(src.id, {
+    const rows = await consultar(src, {
       $select: `${src.muni} as municipio, ${src.depto} as departamento, ${aggExpr(src)} as total`,
       $where: currentPeriodWhere(src, src.extraWhere),
       $group: `${src.muni}, ${src.depto}`,
@@ -327,7 +358,7 @@ Object.entries(MUNI_NACIONAL_FILES).forEach(([file, src]) => {
 // anterior truncaba silenciosamente algunas fuentes exactamente en 20.000 filas.
 Object.entries(MUNI_NACIONAL_FILES).forEach(([file, src]) => {
   addTask('hist_municipio_' + file.replace(/^municipios_/, ''), async () => {
-    const rows = await soqlAll(src.id, {
+    const rows = await consultarTodas(src, {
       $select: `${src.muni} as municipio, ${src.depto} as departamento, ${yearExpr(src)} as anio, ${aggExpr(src)} as total`,
       $where: src.extraWhere || undefined,
       $group: `${src.muni}, ${src.depto}, anio`,
@@ -611,85 +642,6 @@ addTask('cultivos_coca_municipio', async () => soqlAll('acs4-3wgp', {
   $order: 'codmpio',
 }, { pageSize: 1000 }));
 
-// 16) Hurto de vehículos y «otros hurtos» antes de 2010 (Ministerio de Defensa). Los reportes de la
-// Policía para motos/autos (9vha-vh9n) y abigeato+entidades financieras+piratería (d4fr-sbn2) empiezan
-// en 2010; el Ministerio publica los mismos registros desde 2003 en csb4-y6v2 (vehículos), p88b-5ac7
-// (abigeato), i7h7-wmjc (entidades financieras) y sutf-7dyz (piratería terrestre), con la misma
-// convención de nombres que hurto a personas/residencias/comercio. Verificado el 27-oct-2026: en 2010
-// coinciden exactamente, también por departamento (21.456 vehículos; 1.373 + 69 + 416 = 1.858). Sin
-// esto el hurto nacional 2003–2009 quedaba ~22 mil/año por debajo de la cifra oficial y la tendencia
-// daba un salto falso en 2010. Solo se completan los años anteriores a 2010 que la Policía no trae;
-// si en 2010 las dos fuentes dejan de coincidir (±1 %), la tarea falla y se conserva la publicación.
-// (Lesiones ya no necesita empalme: sale entera del Ministerio, ver SRC.lesiones.)
-const ANTES_2010 = {
-  hurto: ['csb4-y6v2'],
-  hurto_extra: ['p88b-5ac7', 'i7h7-wmjc', 'sutf-7dyz'],
-};
-const ANIO_SOLAPE = 2010;
-const COMPLEMENTO_ANTES_2010 = {
-  hist_nacional_hurto: ['hurto', []],
-  hist_depto_hurto: ['hurto', ['departamento']],
-  hist_municipio_hurto_vehiculos: ['hurto', ['municipio', 'departamento']],
-  hist_nacional_hurto_extra: ['hurto_extra', []],
-  hist_depto_hurto_extra: ['hurto_extra', ['departamento']],
-  hist_municipio_hurto_extra: ['hurto_extra', ['municipio', 'departamento']],
-};
-
-// Puras (probadas sin red en test_co_fuentes_mindefensa.js).
-function sumarPorClave(filas, campos) {
-  const acc = new Map();
-  for (const r of filas) {
-    const k = [...campos.map(c => r[c]), String(r.anio)].join('\u0000');
-    const prev = acc.get(k);
-    if (prev) prev.total += Number(r.total) || 0;
-    else acc.set(k, { ...Object.fromEntries(campos.map(c => [c, r[c]])), anio: String(r.anio), total: Number(r.total) || 0 });
-  }
-  return [...acc.values()].map(r => ({ ...r, total: String(r.total) }));
-}
-function totalDelAnio(filas, anio) {
-  return filas.filter(r => Number(r.anio) === anio).reduce((s, r) => s + (Number(r.total) || 0), 0);
-}
-function verificarSolape(policia, ministerio, anio = ANIO_SOLAPE, fuente = 'serie') {
-  const a = totalDelAnio(policia, anio), b = totalDelAnio(ministerio, anio);
-  if (!a || !b || Math.abs(a - b) / Math.max(a, b) > 0.01) {
-    throw new Error(`${fuente} antes de ${anio}: Policía (${a}) y Ministerio (${b}) ya no coinciden en ${anio}; revisar antes de completar`);
-  }
-}
-function completarAntesDe(policia, ministerio, campos, anio = ANIO_SOLAPE) {
-  const presentes = new Set(policia.map(r => String(r.anio)));
-  const extra = sumarPorClave(ministerio.filter(r => Number(r.anio) < anio && !presentes.has(String(r.anio))), campos);
-  return [...policia, ...extra];
-}
-
-async function filasMinDefensa(ids, campos, where) {
-  const filas = [];
-  for (const id of ids) {
-    const grupo = [...campos, 'anio'].join(', ');
-    filas.push(...await soqlAll(id, {
-      $select: [...campos, 'date_extract_y(fecha_hecho) as anio', 'sum(cantidad::number) as total'].join(', '),
-      $where: where,
-      $group: grupo,
-      $order: grupo,
-    }));
-  }
-  return filas;
-}
-
-tasks.forEach(t => {
-  const conf = COMPLEMENTO_ANTES_2010[t.name];
-  if (!conf) return;
-  const [fuente, campos] = conf;
-  const original = t.fn;
-  t.fn = async () => {
-    const policia = await original();
-    const ids = ANTES_2010[fuente];
-    const solape = await filasMinDefensa(ids, [], `date_extract_y(fecha_hecho)=${ANIO_SOLAPE}`);
-    verificarSolape(policia, solape, ANIO_SOLAPE, fuente);
-    const previos = await filasMinDefensa(ids, campos, `fecha_hecho < '${ANIO_SOLAPE}-01-01T00:00:00'`);
-    return completarAntesDe(policia, previos, campos);
-  };
-});
-
 // -------- Ejecución (secuencial, con pequeño delay para no saturar la API pública) --------
 async function main() {
   // CRIMENAI_ONLY=patron1,patron2 ejecuta solo las tareas cuyo nombre contiene alguno de los patrones
@@ -720,4 +672,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { soqlAll, main, SRC, ANTES_2010, COMPLEMENTO_ANTES_2010, sumarPorClave, verificarSolape, completarAntesDe };
+module.exports = { soqlAll, main, SRC, sumarFilas, deVarios };
