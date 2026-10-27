@@ -5,8 +5,8 @@
 //
 // Uso:  node data/fetch_raw.js
 // Salida: escribe ~50 archivos *.json en data/ (mismo formato/nombre que espera merge.js).
-// Si una fuente falla (red, dataset caído, cambio de esquema), se loguea un warning y se sigue
-// con las demás — nunca se aborta el proceso completo por una sola fuente.
+// Si una fuente falla (red, dataset caído, cambio de esquema), se registran los errores,
+// se completan las demás descargas y la corrida termina con error para no publicar datos parciales.
 
 const fs = require('fs');
 const path = __dirname;
@@ -128,7 +128,7 @@ const SRC = {
   // Lesiones: el reporte DIPON mezcla las lesiones personales con las lesiones culposas en accidente
   // de tránsito (art. 120, ~48 mil al año). El Ministerio de Defensa publica estas aparte («Lesiones
   // accidentes de tránsito»); sin ellas la serie cuadra con su «Lesiones personales» año por año
-  // (CrimenAi: data/audit_co_mindefensa.js, 27-oct-2026). No son violencia: no entran en la categoría.
+  // (data/audit_co_mindefensa.js, 27-oct-2026). No son violencia: no entran en la categoría.
   lesiones: { id: '72sg-cybi', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "descripci_n_conducta not like '%ACCIDENTE DE TRANSITO%'" },
   // Terrorismo: cifra oficial del Ministerio de Defensa (yi5j-5fe9, «se mide en casos», art. 343, desde
   // 2003). El reporte DIJIN de la Policía (37p5-impc) solo trae las denuncias validadas con la Fiscalía
@@ -292,10 +292,10 @@ async function breakdown(src, field, outKey) {
   return rows;
 }
 
-// 7) Municipios completos, TODOS los 33 departamentos (homicidio, extorsion, hurto=4 subfuentes),
+// 7) Municipios completos, TODOS los 33 departamentos (homicidio, extorsion, hurto=5 subfuentes),
 // año vigente. Alimenta municipiosDetalle en merge.js (~1.122 municipios).
-// hurto se compone de las mismas 4 subfuentes que HURTO_SUBFUENTES en merge.js (personas,
-// residencias, vehículos, abigeato+financiero+pirateria) para ser consistente con el total
+// hurto se compone de las mismas 5 subfuentes que HURTO_SUBFUENTES en merge.js (personas,
+// residencias, vehículos, abigeato+financiero+piratería y comercio) para ser consistente con el total
 // nacional de "hurto" del resto del dashboard.
 const MUNI_NACIONAL_FILES = {
   municipios_homicidio: SRC.homicidio,
@@ -714,13 +714,14 @@ async function main() {
   }
   console.log('\nResumen: ' + okCount + ' OK, ' + failCount + ' fallidas de ' + tasks.length + ' fuentes.');
   if (failures.length) {
-    console.log('Fuentes fallidas (se usarán datos vacíos/parciales para esos archivos en merge.js):');
+    console.log('Fuentes fallidas (se conserva la publicación anterior):');
     failures.forEach(f => console.log('  - ' + f));
   }
-  // No exit(1) aquí: un fallo parcial no debe tumbar el workflow; merge.js decide si el total
-  // agregado final es razonable y aborta él mismo si no lo es.
+  // Una fuente ausente puede dejar totales plausibles pero incompletos. Conservamos la
+  // publicación anterior hasta que todas las descargas terminen correctamente.
+  if (failCount) process.exitCode = 1;
 }
 
 if (require.main === module) main();
 
-module.exports = { soqlAll, SRC, ANTES_2010, COMPLEMENTO_ANTES_2010, sumarPorClave, verificarSolape, completarAntesDe };
+module.exports = { soqlAll, main, SRC, ANTES_2010, COMPLEMENTO_ANTES_2010, sumarPorClave, verificarSolape, completarAntesDe };

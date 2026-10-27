@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = __dirname;
 const { CURRENT_YEAR } = require('./pipeline_config');
+const { reconcileAnmHistorical } = require('./reconcile_co_historical');
 
 function load(name) {
   return JSON.parse(fs.readFileSync(path + '/' + name, 'utf8'));
@@ -90,7 +91,7 @@ const CATS_OVERLAY = ['feminicidios', 'minas_antipersonal', 'capturas'];
 const ALL_CATS = CATS.concat(CATS_OVERLAY);
 ALL_CATS.forEach(c => { DEPARTAMENTOS.forEach(d => { byKey[d.key][c] = 0; }); });
 
-// "hurto" es un compuesto de 4 fuentes reales de Policía Nacional (personas, residencias, vehículos, otros)
+// "hurto" es un compuesto de 5 fuentes reales de Policía Nacional (personas, residencias, vehículos, otros, comercio)
 const HURTO_SUBFUENTES = {
   personas: 'hurto_personas',
   residencias: 'hurto_residencias',
@@ -284,15 +285,20 @@ const analitica = {
 
 // -------- Municipios completos, los 33 departamentos (enriquecimiento) --------
 // Fuentes nacionales agregadas por municipio (ver fetch_raw.js, sección 7): homicidio, extorsión y
-// hurto (compuesto de sus 4 subfuentes de Policía Nacional, igual que HURTO_SUBFUENTES arriba),
+// hurto (compuesto de sus 5 subfuentes de Policía Nacional, igual que HURTO_SUBFUENTES arriba),
 // periodo actual 2025-2026. Antes esto solo se calculaba para Antioquia y Valle; ahora cubre las
 // 33 llaves de DEPARTAMENTOS para que la Vista Táctica pueda colorear los ~1.122 municipios reales.
 // Llave canónica de municipio: sin acentos y en mayúsculas, para que el mismo municipio cruce
 // entre fuentes que no siempre acentúan igual (ej. "Medellín" en una fuente, "MEDELLIN" en otra) —
-// sin esto, el mismo municipio podía duplicarse o no cruzar entre las 4 sub-fuentes de hurto, o
+// sin esto, el mismo municipio podía duplicarse o no cruzar entre las 5 subfuentes de hurto, o
 // entre el periodo actual y el histórico (ver historicoMunicipal más abajo).
 function normalizeMuniKey(name) {
   return stripAccents(String(name)).toUpperCase().replace(/\s+/g, ' ').trim();
+}
+function municipioSinUbicacion(value) {
+  if (value === undefined || value === null) return true;
+  const normalized = normalizeMuniKey(value);
+  return !normalized || ['SIN ESTABLECER', 'SIN INFORMACION', 'NO INFORMADO'].includes(normalized);
 }
 const filasSinMunicipio = [];
 function municipiosNacional(field, files) {
@@ -301,7 +307,7 @@ function municipiosNacional(field, files) {
     tryLoad(file + '.json').forEach(r => {
       const deptoKey = normalizeDeptoName(r.departamento);
       if (!byKey[deptoKey]) return; // descarta deptos no reconocidos ("Sin Información", etc.)
-      if (r.municipio === undefined || r.municipio === null || String(r.municipio).trim() === '') {
+      if (municipioSinUbicacion(r.municipio)) {
         filasSinMunicipio.push(field + ' ' + deptoKey + ' ' + r.total);
         return; // hechos sin municipio: siguen contando en el total departamental, no en el municipal
       }
@@ -378,6 +384,9 @@ function municipioHistorico(files) {
     tryLoad('hist_municipio_' + file + '.json').forEach(r => {
       const deptoKey = normalizeDeptoName(r.departamento);
       if (!byKey[deptoKey]) return;
+      // El histórico tampoco debe crear llaves ficticias como UNDEFINED|NARINO.
+      // Estos hechos permanecen en el agregado departamental de la fuente.
+      if (municipioSinUbicacion(r.municipio)) return;
       const name = String(r.municipio).replace(/\s*\(CT\)\s*$/, '').trim();
       const k = normalizeMuniKey(name) + '|' + deptoKey;
       if (!byMuniKey[k]) byMuniKey[k] = {};
@@ -588,7 +597,7 @@ console.log('Histórico municipal: ' + seriesHistoricasFusionadas + ' series de 
 // INDIAS" o "CUCUTA" donde DANE dice "Cartagena" o "San José de Cúcuta"). Un municipio DANE sin
 // ninguna fila en las fuentes vigentes se materializa con estado "no_reportado": nunca desaparece ni se
 // convierte silenciosamente en un cero observado. DANE 2025 tiene 1.123 municipios; el más reciente,
-// Nuevo Belén de Bajirá (27493), todavía no está en la geometría HDX de 1.122 features.
+// Nuevo Belén de Bajirá (27493) ya está en la geometría DANE MGN 2025 de 1.122 features.
 const divipolasPresentes = new Set(Object.values(municipiosDetalle).flat().map(m => m.divipola).filter(Boolean));
 let municipiosCatalogoAgregados = 0;
 poblacionMunicipios.forEach(r => {
@@ -600,6 +609,15 @@ poblacionMunicipios.forEach(r => {
   divipolasPresentes.add(divipola);
   municipiosCatalogoAgregados++;
 });
+
+// SIEDCO omite el sufijo DANE "(ANM)" en algunas series antiguas. Tras completar
+// el catálogo, asocia esas series a la ficha territorial única del corregimiento.
+const seriesAnmConciliadas = reconcileAnmHistorical(
+  municipiosDetalle,
+  { ...historicoMunicipal, ...historicoMunicipalOverlay },
+  normalizeMuniKey,
+);
+console.log('Histórico municipal: ' + seriesAnmConciliadas + ' series (ANM) conciliadas con DANE.');
 
 // 3) Tasas, estado de cobertura y orden.
 let municipiosConPoblacion = 0;
@@ -978,11 +996,16 @@ const output = {
     fuente: 'Policía Nacional de Colombia (SIEDCO) vía datos.gov.co + DIJIN/Policía Nacional (reporte de capturas 3jdh-nmwu) + Fiscalía General de la Nación (SPOA) para delitos informáticos, procesos y víctimas + Instituto Nacional de Medicina Legal y Ciencias Forenses (SIRDEC) para personas desaparecidas y para homicidios en municipios amazónicos que SIEDCO nunca reporta + Centro Nacional de Memoria Histórica (SIEVCAC) para víctimas de minas antipersonal',
     poblacionFuente: 'DANE 2025',
     periodoActual: `Año ${CURRENT_YEAR} (YTD; el corte exacto puede variar por fuente)`,
+    cortesParciales: Object.fromEntries(Object.entries(historicoNacional)
+      .filter(([, rows]) => rows.some(row => String(row.anio) === String(CURRENT_YEAR)))
+      .map(([category]) => [category, {
+        [CURRENT_YEAR]: `año ${CURRENT_YEAR} en curso; corte exacto variable por fuente`,
+      }])),
     rangoHistorico: { min: anioGlobalMin, max: anioGlobalMax },
     rangoAnios,
     coberturaMunicipal,
     generado: new Date().toISOString(),
-    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 5 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre y comercio); de 2003 a 2009 vehículos, abigeato, entidades financieras y piratería vienen de los mismos registros publicados por el Ministerio de Defensa, porque los reportes de la Policía empiezan en 2010 (en 2010 ambas fuentes coinciden exactamente). Lesiones personales excluye las lesiones culposas en accidente de tránsito (art. 120 del Código Penal), que el reporte de la Policía mezclaba y el Ministerio de Defensa publica aparte. Terrorismo = casos registrados por el Ministerio de Defensa (cifra oficial, desde 2003); el reporte de la Policía solo trae las denuncias validadas con la Fiscalía, muchas menos desde 2016. Delitos sexuales y violencia intrafamiliar = Ministerio de Defensa (mismos registros que la Policía, desde 2003 y con corte más reciente); el tipo de delito, la edad y el sexo en violencia intrafamiliar solo los publica la Policía y llevan su propio tramo. Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
+    nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 5 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre y comercio); de 2003 a 2009 vehículos, abigeato, entidades financieras y piratería vienen de los mismos registros publicados por el Ministerio de Defensa, porque los reportes de la Policía empiezan en 2010 (en 2010 ambas fuentes coinciden exactamente). Lesiones personales excluye las lesiones culposas en accidente de tránsito (art. 120 del Código Penal), que el reporte de la Policía mezclaba y el Ministerio de Defensa publica aparte; de 2003 a 2009 vienen de los mismos registros publicados por el Ministerio de Defensa, porque el reporte de la Policía empieza en 2010 (2010–2012 coinciden exactamente). Terrorismo = casos registrados por el Ministerio de Defensa (cifra oficial, desde 2003); el reporte de la Policía solo trae las denuncias validadas con la Fiscalía, muchas menos desde 2016. Delitos sexuales y violencia intrafamiliar = Ministerio de Defensa (mismos registros que la Policía, desde 2003 y con corte más reciente); el tipo de delito, la edad y el sexo en violencia intrafamiliar solo los publica la Policía y llevan su propio tramo. Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
   },
   categorias: CATS,
   categoriasOverlay: CATS_OVERLAY,
@@ -1017,6 +1040,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  output,
   normalizeDeptoName, normalizeMuniKey, FP_METRICAS, overlaysFuerzaPublica,
   fpNum, fpDivipola, fpNombreMunicipio, fpActualPorDepto, fpHistoricoNacional,
   fpHistoricoDepartamental, fpActualPorMunicipio, fpHistoricoMunicipal,
