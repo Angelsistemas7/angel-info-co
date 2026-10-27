@@ -116,7 +116,11 @@ const SRC = {
   sexuales: { id: 'fpe5-yrmw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', delito: 'delito', genero: 'genero', grupo_etario: 'grupo_etario' },
   violencia_intrafamiliar: { id: 'vuyt-mqpw', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', genero: 'genero', grupo_etario: 'grupo_etario' },
   amenazas: { id: 'meew-mguv', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
-  lesiones: { id: '72sg-cybi', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // Lesiones: el reporte DIPON mezcla las lesiones personales con las lesiones culposas en accidente
+  // de tránsito (art. 120, ~48 mil al año). El Ministerio de Defensa publica estas aparte («Lesiones
+  // accidentes de tránsito»); sin ellas la serie cuadra con su «Lesiones personales» año por año
+  // (CrimenAi: data/audit_co_mindefensa.js, 27-oct-2026). No son violencia: no entran en la categoría.
+  lesiones: { id: '72sg-cybi', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "descripci_n_conducta not like '%ACCIDENTE DE TRANSITO%'" },
   terrorismo: { id: '37p5-impc', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   estupefacientes: { id: 'kk69-w2jj', dateType: 'text', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', clase_bien: 'clase_bien', aggType: 'count' },
   feminicidio: { id: 'm8fd-ahd9', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad', extraWhere: "spoa_caracterizacion='FEMINICIDIO'" },
