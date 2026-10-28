@@ -604,6 +604,31 @@ Object.entries(municipiosDetalle).forEach(([deptoKey, munis]) => {
   });
 });
 console.log('Histórico municipal: ' + seriesHistoricasFusionadas + ' series de alias sumadas a su municipio principal.');
+// Llaves de otra fuente que no son alias de ninguna fila del detalle: el Ministerio de Defensa
+// escribe «CHIBOLO» y «LEGUIZAMO» donde la Policía (que da las llaves) escribe «CHIVOLO» y
+// «PUERTO LEGUIZAMO». Se resuelven por DIVIPOLA con el mismo cruce DANE de la población; si no hay
+// un único municipio con ese código, la llave se queda y test_co_series_fantasma.js la señala.
+const llavePorDivipola = {};
+Object.entries(municipiosDetalle).forEach(([deptoKey, munis]) => munis.forEach(m => {
+  if (m.divipola) llavePorDivipola[deptoKey + '|' + m.divipola] = normalizeMuniKey(m.municipio) + '|' + deptoKey;
+}));
+const llavesDelDetalle = new Set(Object.values(llavePorDivipola));
+let seriesResueltasPorDivipola = 0;
+[...Object.values(historicoMunicipal), ...Object.values(historicoMunicipalOverlay)].forEach(serie => {
+  Object.keys(serie).forEach(llave => {
+    const corte = llave.lastIndexOf('|');
+    const deptoKey = llave.slice(corte + 1);
+    if (!municipiosDetalle[deptoKey] || llavesDelDetalle.has(llave)) return;
+    const registro = buscarRegistroPoblacion(deptoKey, llave.slice(0, corte));
+    const destinoKey = registro && llavePorDivipola[deptoKey + '|' + registro.divipola];
+    if (!destinoKey || destinoKey === llave) return;
+    const destino = serie[destinoKey] = serie[destinoKey] || {};
+    Object.entries(serie[llave]).forEach(([anio, total]) => { destino[anio] = (destino[anio] || 0) + total; });
+    delete serie[llave];
+    seriesResueltasPorDivipola++;
+  });
+});
+console.log('Histórico municipal: ' + seriesResueltasPorDivipola + ' series con otro nombre unidas a su municipio por DIVIPOLA.');
 
 // 2) Catálogo territorial completo, por código DIVIPOLA (no por nombre: SIEDCO escribe "CARTAGENA DE
 // INDIAS" o "CUCUTA" donde DANE dice "Cartagena" o "San José de Cúcuta"). Un municipio DANE sin
