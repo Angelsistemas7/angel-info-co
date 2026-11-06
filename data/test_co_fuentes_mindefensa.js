@@ -47,12 +47,22 @@ assert.equal(SRC.lesiones.extraWhere, undefined);
 for (const m of fetchSrc.matchAll(/(?:soql|soqlAll)\(SRC\.(\w+)\.id/g)) assert.ok(!SRC[m[1]].ids, `${m[1]} se consulta con su único id`);
 
 // Series aparte del Ministerio (overlay, no suman al total): mismo esquema, trata solo arts. 188 A y B.
-for (const [cat, id] of [['trata_personas', '95c7-mm6s'], ['delitos_ambientales', '9zck-qfvc'], ['invasion_tierras', 'kvjj-d2ay'], ['voladura_oleoductos', 'ec2r-4byk'], ['voladura_puentes_vias', 'm98b-cdys']]) {
+for (const [cat, id] of [['trata_personas', '95c7-mm6s'], ['delitos_ambientales', '9zck-qfvc'], ['invasion_tierras', 'kvjj-d2ay'], ['voladura_oleoductos', 'ec2r-4byk'], ['voladura_puentes_vias', 'm98b-cdys'], ['homicidios_transito', 'uav5-b85g']]) {
   assert.equal(SRC[cat].id, id, `${cat} usa el conjunto del Ministerio`);
   assert.equal(SRC[cat].dateType, 'iso');
 }
 assert.match(SRC.trata_personas.extraWhere, /^\(.*188 A.*188 B.*\)$/, 'trata: 188 A y B entre paréntesis (se une al filtro de año)');
 assert.doesNotMatch(SRC.trata_personas.extraWhere, /MIGRANTES/);
+// Homicidio en accidente de tránsito (6-nov-2026): capa aparte con histórico nacional, departamental y
+// municipal; nunca entra en «homicidios» ni en el total (merge.js se lee como texto: al cargarse lee los crudos).
+assert.equal(SRC.homicidios_transito.extraWhere, undefined, 'tránsito: el conjunto entero (cantidad = víctimas)');
+assert.match(fetchSrc, /const HIST_SOURCES = \{[^}]*homicidios_transito: SRC\.homicidios_transito,\s*\};/, 'histórico nacional y departamental');
+assert.match(fetchSrc, /municipios_homicidios_transito: SRC\.homicidios_transito/, 'y municipal');
+const mergeSrc = fs.readFileSync(path.join(__dirname, 'merge.js'), 'utf8');
+assert.match(mergeSrc, /const CATS_OVERLAY = \[[^\]]*'homicidios_transito'\]/, 'tránsito es serie aparte');
+assert.doesNotMatch(mergeSrc.match(/const CATS = \[[^\]]*\]/)[0], /transito/, 'y no suma al total');
+assert.match(mergeSrc, /homicidios_transito: \['homicidios_transito'\]/, 'con detalle municipal');
+assert.match(mergeSrc, /homicidios_transito: \{\s*fuente:[\s\S]*?unidad: 'víctimas'/, 'con fuente y unidad en meta');
 
 // Filas de varios conjuntos: se suman las que comparten todas las columnas salvo el total.
 assert.deepEqual(sumarFilas([

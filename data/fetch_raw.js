@@ -198,6 +198,12 @@ const SRC = {
   voladura_oleoductos: { id: 'ec2r-4byk', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
   // Vías públicas (92 %) y puentes. 2025: 25.
   voladura_puentes_vias: { id: 'm98b-cdys', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
+  // Homicidio culposo en accidente de tránsito (art. 109), «se mide en víctimas»: cantidad = víctimas
+  // por fila (1 en el 99,7 %). Desde 2003, 1.077 municipios. Medido el 6-nov-2026: igual al reporte de la
+  // Policía (ha6j-pa2r) en 2018–2025 salvo 7 en 2022 (7.532 frente a 7.539), con corte más reciente
+  // (30-sep-2026: 6.837 frente a 5.167 a julio). 2025: 7.563. Es el registro penal, no la cifra de
+  // seguridad vial (ANSV/Medicina Legal cuentan muertes hasta 30 días después: 8.271 en 2024 frente a 7.126).
+  homicidios_transito: { id: 'uav5-b85g', dateType: 'iso', dateField: 'fecha_hecho', depto: 'departamento', muni: 'municipio', cant: 'cantidad' },
 };
 
 // -------- Tareas: cada una produce un archivo data/<nombre>.json --------
@@ -247,6 +253,7 @@ const HIST_SOURCES = {
   capturas: SRC.capturas,
   trata_personas: SRC.trata_personas, delitos_ambientales: SRC.delitos_ambientales, invasion_tierras: SRC.invasion_tierras,
   voladura_oleoductos: SRC.voladura_oleoductos, voladura_puentes_vias: SRC.voladura_puentes_vias,
+  homicidios_transito: SRC.homicidios_transito,
 };
 Object.entries(HIST_SOURCES).forEach(([file, src]) => {
   addTask('hist_depto_' + file, async () => {
@@ -400,6 +407,7 @@ const MUNI_EXTRA_FILES = {
   // Solo las dos con cobertura municipal amplia (oleoductos y puentes caen en 6 y 11 municipios).
   municipios_delitos_ambientales: SRC.delitos_ambientales,
   municipios_invasion_tierras: SRC.invasion_tierras,
+  municipios_homicidios_transito: SRC.homicidios_transito,
 };
 Object.entries(MUNI_EXTRA_FILES).forEach(([file, src]) => {
   addTask(file, async () => soqlAll(src.id, {

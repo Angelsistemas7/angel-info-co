@@ -82,7 +82,9 @@ const CATS = ['homicidios', 'secuestros', 'extorsion', 'amenazas', 'delitos_sexu
 // (mismo criterio que dejar desaparecidosUBPD fuera de CATS). Se muestra igual en el mapa/leyenda/
 // histórico vía el mecanismo genérico de categorías overlay.
 const CATS_OVERLAY = ['feminicidios', 'minas_antipersonal', 'capturas', 'trata_personas', 'delitos_ambientales',
-  'invasion_tierras', 'voladura_oleoductos', 'voladura_puentes_vias'];
+  'invasion_tierras', 'voladura_oleoductos', 'voladura_puentes_vias', 'homicidios_transito'];
+// 'homicidios_transito' (Ministerio de Defensa, uav5-b85g) es homicidio CULPOSO en accidente de tránsito
+// (art. 109): no es violencia intencional y no entra en «homicidios» (m8fd-ahd9 no lo trae). Va aparte.
 // 'capturas' (personas detenidas por la Policía Nacional, DIJIN 3jdh-nmwu) tampoco se suma al
 // total nacional, por la misma razón que minas_antipersonal: no es un delito denunciado sino
 // actividad operativa policial (mismo criterio que las aprehensiones de Costa Rica). Una captura
@@ -121,6 +123,7 @@ const FILES = {
   invasion_tierras: 'invasion_tierras',
   voladura_oleoductos: 'voladura_oleoductos',
   voladura_puentes_vias: 'voladura_puentes_vias',
+  homicidios_transito: 'homicidios_transito',
 };
 
 // -------- Current period (año vigente) department totals --------
@@ -161,7 +164,7 @@ currentFromHistDepto('amenazas', 'amenazas');
 currentFromHistDepto('lesiones', 'lesiones');
 currentFromHistDepto('terrorismo', 'terrorismo');
 currentFromHistDepto('minas_antipersonal', 'minas_antipersonal');
-['trata_personas', 'delitos_ambientales', 'invasion_tierras', 'voladura_oleoductos', 'voladura_puentes_vias']
+['trata_personas', 'delitos_ambientales', 'invasion_tierras', 'voladura_oleoductos', 'voladura_puentes_vias', 'homicidios_transito']
   .forEach(c => currentFromHistDepto(c, c));
 
 const departamentos = Object.values(byKey).map(d => {
@@ -347,6 +350,7 @@ const MUNI_CATS = {
 const MUNI_OVERLAYS = {
   feminicidios: ['feminicidio'], capturas: ['capturas'],
   delitos_ambientales: ['delitos_ambientales'], invasion_tierras: ['invasion_tierras'],
+  homicidios_transito: ['homicidios_transito'],
 };
 const MUNI_FIELDS = Object.keys(MUNI_CATS);
 const MUNI_ALL_FIELDS = [...MUNI_FIELDS, ...Object.keys(MUNI_OVERLAYS)];
@@ -1041,6 +1045,15 @@ const output = {
     rangoHistorico: { min: anioGlobalMin, max: anioGlobalMax },
     rangoAnios,
     coberturaMunicipal,
+    // Fuente, unidad y nota de la capa aparte (la app las muestra en la leyenda y en la ficha).
+    homicidios_transito: {
+      fuente: 'Ministerio de Defensa Nacional — homicidio en accidente de tránsito (datos.gov.co)',
+      url: 'https://www.datos.gov.co/d/uav5-b85g',
+      licencia: 'CC BY-SA 4.0',
+      unidad: 'víctimas',
+      definicion: 'Personas muertas en accidentes de tránsito registradas como homicidio culposo (artículo 109 del Código Penal): muerte no intencional por conducir de forma negligente o temeraria.',
+      nota: 'Serie separada: no es violencia intencional y no suma al total ni a «Homicidios». Es el registro penal de la Policía (mismas cifras que su reporte, con corte más reciente), no la cifra de seguridad vial: la Agencia Nacional de Seguridad Vial y Medicina Legal cuentan también a quien muere hasta 30 días después (8.271 en 2024 frente a 7.126 aquí) y las secretarías de movilidad usan su propio registro (Bogotá 2025: 552 frente a 609 aquí).',
+    },
     generado: new Date().toISOString(),
     nota: 'Estupefacientes = número de operativos de incautación registrados (no víctimas). Hurto = suma de 5 reportes de Policía Nacional (personas, residencias, motos/autos, abigeato+entidades financieras+piratería terrestre y comercio); de 2003 a 2009 vehículos, abigeato, entidades financieras y piratería vienen de los mismos registros publicados por el Ministerio de Defensa, porque los reportes de la Policía empiezan en 2010 (en 2010 ambas fuentes coinciden exactamente). Lesiones personales = Ministerio de Defensa (mismos registros que la Policía, desde 2003 y con corte más reciente), sin las lesiones culposas en accidente de tránsito (art. 120 del Código Penal), que el reporte de la Policía mezclaba y el Ministerio publica aparte. Terrorismo = casos registrados por el Ministerio de Defensa (cifra oficial, desde 2003); el reporte de la Policía solo trae las denuncias validadas con la Fiscalía, muchas menos desde 2016. Delitos sexuales y violencia intrafamiliar = Ministerio de Defensa (mismos registros que la Policía, desde 2003 y con corte más reciente); el tipo de delito, la edad y el sexo en violencia intrafamiliar solo los publica la Policía y llevan su propio tramo. Feminicidios es un subconjunto de Homicidios (misma fuente SIEDCO) y NO se suma al total nacional para evitar doble conteo. Delitos Informáticos usa año de los hechos (Fiscalía/SPOA), no departamento geolocalizado por SIEDCO. Minas Antipersonal (MAP/MUSE/AEI) viene del Centro Nacional de Memoria Histórica (SIEVCAC, corte 31-03-2026), NO de la Policía Nacional/SIEDCO: son víctimas civiles y de la fuerza pública por artefactos explosivos en el marco del conflicto armado, un tipo de dato distinto a una denuncia penal — por eso tampoco se suma al total nacional (misma lógica que Personas Desaparecidas). En Amazonas/Guainía/Vaupés, ' + municipiosRellenadosMedLegal + ' municipios/corregimientos departamentales que SIEDCO nunca ha reportado (ni una fila en toda su serie histórica 2003-2026) muestran homicidios tomados de Medicina Legal (INMLCF) en su lugar -- extorsión/hurto quedan en 0 para esos municipios puntuales porque Medicina Legal no cubre esas categorías (ver notaFuente en cada municipio afectado, campo municipiosDetalle). Capturas = personas detenidas por la Policía Nacional (DIJIN, serie 2010-2026, desagregada por departamento/municipio/conducta/sexo/edad): es actividad operativa policial, NO un delito denunciado nuevo, por eso es categoría overlay y NO suma al total nacional (una captura no equivale a un hecho adicional; la persona puede quedar libre o corresponder a un delito ya contado en otra categoría).',
   },
