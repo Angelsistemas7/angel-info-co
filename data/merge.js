@@ -203,6 +203,30 @@ ALL_CATS.forEach(c => {
   historicoDepartamental[c] = byDepto;
 });
 
+// Años fuera de la serie (§156): la fuente de minas (CNMH/SIEVCAC) trae filas con año «0» (sin año
+// del hecho) y víctimas desde 1953 con registro retroactivo; las series de la app empiezan en 2003.
+// No se pierden en silencio: se apartan del histórico nacional y departamental (por igual, así la
+// suma de departamentos sigue cuadrando con el país) y se declaran en meta.fueraDeRango.
+const ANIO_MIN_SERIE = 2003;
+const fueraDeRango = {};
+ALL_CATS.forEach(c => {
+  let sinAnio = 0, antes = 0, desde = null;
+  historicoNacional[c] = historicoNacional[c].filter(r => {
+    const y = Number(r.anio);
+    if (!Number.isInteger(y) || y < 1900 || y > CURRENT_YEAR) { sinAnio += r.total; return false; }
+    if (y < ANIO_MIN_SERIE) { antes += r.total; desde = desde === null ? y : Math.min(desde, y); return false; }
+    return true;
+  });
+  Object.values(historicoDepartamental[c]).forEach(serie => {
+    Object.keys(serie).forEach(a => {
+      const y = Number(a);
+      if (!Number.isInteger(y) || y < ANIO_MIN_SERIE || y > CURRENT_YEAR) delete serie[a];
+    });
+  });
+  if (sinAnio || antes) fueraDeRango[c] = { sinAnio, antes, desde, serieDesde: ANIO_MIN_SERIE };
+});
+if (Object.keys(fueraDeRango).length) console.log('Fuera de la serie (declarado en meta.fueraDeRango):', JSON.stringify(fueraDeRango));
+
 // Range of years actually available per category (una categoría sin serie — ej. crudos aún no
 // descargados — queda en {min:null,max:null} y no afecta el rango global)
 const rangoAnios = {};
@@ -1044,6 +1068,8 @@ const output = {
       }])),
     rangoHistorico: { min: anioGlobalMin, max: anioGlobalMax },
     rangoAnios,
+    // Registros que la fuente publica sin año o antes de 2003: fuera de la serie, pero declarados.
+    fueraDeRango,
     coberturaMunicipal,
     // Fuente, unidad y nota de la capa aparte (la app las muestra en la leyenda y en la ficha).
     homicidios_transito: {
